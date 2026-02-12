@@ -64,6 +64,15 @@ Smoke:
 - `docs/PLUGIN-BRIDGE.md`
 - `docs/CLIENT-INTEGRATION.md`
 
+Совместимость клиентов:
+
+- Codex: да, есть профиль `codex-mcp.example.json`.
+- Claude Code: да, есть профиль `claude-code-mcp.example.json`.
+- Antigravity: да, есть профиль `antigravity-mcp.example.json`.
+
+Важный нюанс: сейчас сервер работает как HTTP API (`/health`, `/tool`), см. `mcp_qgis/server.py:58` и `mcp_qgis/server.py:66`.
+То есть это не "чистый" MCP JSON-RPC server-transport, а совместимость через внешний HTTP-инструмент клиента.
+
 Запуск QGIS + MCP (удобный launcher):
 
 ```bash
