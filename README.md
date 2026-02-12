@@ -1,44 +1,42 @@
 # MCP-QGIS
 
-Implementation repository for MCP + QGIS cadastre MVP.
+MCP-сервис и QGIS-плагин для управления геооперациями из LLM (через MCP) с фокусом на кадастровые сценарии.
 
-## Current Status
+![QGIS + MCP screenshot](docs/assets/qgis-mcp-screenshot.png)
 
-- Planning documents: `PLANS/`
-- MVP skeleton code: `mcp_qgis/`
-- Schemas: `schemas/`, `PLAN-IR-SCHEMA.json`
-- Tests: `tests/`
-- Reference datasets: `testdata/`
-- Deployment profiles: `deploy/profiles/`
-- Client integration profiles: `deploy/clients/`
-- Ops scripts: `scripts/`
-- QGIS plugin bridge: `qgis_plugin/mcp_qgis_bridge/`
+## Что в репозитории
 
-## Quick Start
+- `mcp_qgis/` — сервер, инструменты, адаптеры.
+- `qgis_plugin/mcp_qgis_bridge/` — плагин-мост QGIS (Mode A).
+- `docs/` — инструкции по интеграции и запуску.
+- `tests/` — unit/integration/e2e/regression тесты.
+- `PLANS/` — рабочие планы и дорожная карта.
+- `scripts/` — smoke/backup/restore/launcher скрипты.
+
+## Быстрый старт
 
 ```bash
-cd /Users/kostenchuksergey/MCP-QGIS
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
 ```
 
-Check config:
+Проверка окружения:
 
 ```bash
 mcp-qgis check-config
 mcp-qgis doctor
 ```
 
-Run local server:
+Локальный запуск MCP HTTP-сервера:
 
 ```bash
 mcp-qgis run
-# health: GET http://127.0.0.1:8765/health
-# tool endpoint: POST http://127.0.0.1:8765/tool
+# health: GET  http://127.0.0.1:8765/health
+# tool:   POST http://127.0.0.1:8765/tool
 ```
 
-Run with explicit profile:
+Запуск с профилем:
 
 ```bash
 set -a
@@ -47,26 +45,51 @@ set +a
 mcp-qgis run
 ```
 
-Run tests:
+Тесты:
 
 ```bash
 pytest --cov=mcp_qgis --cov-report=term-missing
 ```
 
-Run smoke:
+Smoke:
 
 ```bash
 ./scripts/smoke.sh
 ```
 
-Live QGIS bridge docs:
+## QGIS Bridge
+
+Документация:
 
 - `docs/PLUGIN-BRIDGE.md`
 - `docs/CLIENT-INTEGRATION.md`
 
-Backup and restore runtime:
+Запуск QGIS + MCP (удобный launcher):
+
+```bash
+./scripts/qgis_mcp_launcher.sh
+```
+
+## Backup/Restore
 
 ```bash
 ./scripts/backup_runtime.sh runtime runtime/backups
 ./scripts/restore_runtime.sh runtime/backups/<archive>.tar.gz .
 ```
+
+## Публикация в GitHub
+
+```bash
+git remote add origin git@github.com:<your-user>/<your-repo>.git
+git push -u origin main
+```
+
+Перед публикацией рекомендуется:
+
+- Проверить `git status` (чистый рабочий каталог).
+- Проверить отсутствие локальных секретов/приватных данных в коммитах.
+- Прогнать `pytest`.
+
+## Лицензия
+
+MIT, см. `LICENSE`.
