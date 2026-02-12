@@ -6,6 +6,7 @@ from typing import Any
 import json
 import os
 import shutil
+import socket
 import subprocess
 import time
 
@@ -49,6 +50,8 @@ class QGISAdapter:
     """
 
     mode: str = "mock"
+    bridge_host: str = "127.0.0.1"
+    bridge_port: int = 9876
     timeout_sec: int = 30
     max_attempts: int = 2
     retry_backoff_sec: float = 0.5
@@ -89,14 +92,7 @@ class QGISAdapter:
             }
 
         if self.mode == "mode_a_plugin_bridge":
-            # Placeholder bridge contract for desktop plugin mode.
-            return {
-                "algorithm": algorithm,
-                "parameters": parameters,
-                "mode": self.mode,
-                "status": "bridge_not_connected",
-                "attempts": 1,
-            }
+            return self._run_plugin_bridge(algorithm, parameters)
 
         if self.mode == "mode_b_qgis_process":
             return self._run_qgis_process(algorithm, parameters)
@@ -152,4 +148,71 @@ class QGISAdapter:
         raise MCPQGISError(
             "qgis_process execution failed",
             {"algorithm": algorithm, "attempts": attempts, "error": last_error},
+        )
+
+    def _run_plugin_bridge(self, algorithm: str, parameters: dict[str, Any]) -> dict[str, Any]:
+        attempts = 0
+        last_error = ""
+        request = {
+            "action": "run_algorithm",
+            "algorithm": algorithm,
+            "parameters": parameters,
+        }
+
+        while attempts < self.max_attempts:
+            attempts += 1
+            sock: socket.socket | None = None
+            try:
+                sock = socket.create_connection((self.bridge_host, self.bridge_port), timeout=self.timeout_sec)
+                sock.settimeout(self.timeout_sec)
+                payload = json.dumps(request, ensure_ascii=False).encode("utf-8") + b"\n"
+                sock.sendall(payload)
+
+                chunks: list[bytes] = []
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    if b"\n" in chunk:
+                        break
+                raw = b"".join(chunks).decode("utf-8").strip()
+                if not raw:
+                    last_error = "Empty response from QGIS bridge"
+                else:
+                    line = raw.splitlines()[0]
+                    try:
+                        parsed = json.loads(line)
+                    except json.JSONDecodeError:
+                        parsed = {"raw": line}
+
+                    status = str(parsed.get("status", "ok"))
+                    if status not in {"ok", "simulated"}:
+                        last_error = str(parsed.get("error") or parsed.get("message") or "bridge returned error status")
+                    else:
+                        return {
+                            "algorithm": algorithm,
+                            "mode": self.mode,
+                            "attempts": attempts,
+                            "status": status,
+                            "result": parsed,
+                        }
+            except (OSError, TimeoutError) as exc:
+                last_error = str(exc)
+            finally:
+                if sock is not None:
+                    sock.close()
+
+            if attempts < self.max_attempts:
+                time.sleep(self.retry_backoff_sec)
+
+        raise MCPQGISError(
+            "plugin bridge execution failed",
+            {
+                "algorithm": algorithm,
+                "host": self.bridge_host,
+                "port": self.bridge_port,
+                "attempts": attempts,
+                "error": last_error,
+            },
         )

@@ -1,0 +1,8 @@
+# QGIS Processing algorithms explicitly allowed for plan execution
+native:fixgeometries
+native:splitwithlines
+native:buffer
+native:difference
+native:intersection
+native:snapgeometries
+native:translategeometry

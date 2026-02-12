@@ -11,7 +11,7 @@ from mcp_qgis.core.locks import LockManager
 from mcp_qgis.core.transactions import TransactionManager
 from mcp_qgis.core.plan import PlanValidator
 from mcp_qgis.tools.dispatcher import ToolDispatcher
-from mcp_qgis.errors import ValidationError
+from mcp_qgis.errors import ValidationError, PreconditionError
 
 
 def _dispatcher() -> ToolDispatcher:
@@ -36,6 +36,18 @@ def _valid_plan() -> dict:
         session_id="sess-1",
     )
     return out["plan"]
+
+
+def _confirmation_token(d: ToolDispatcher, plan: dict, request_id: str = "req-prev") -> str:
+    preview = d.handle(
+        "plan_preview",
+        {"plan": plan, "preview_render": False},
+        request_id=request_id,
+        session_id="sess-1",
+    )
+    token = preview.get("confirmation_token")
+    assert isinstance(token, str) and token
+    return token
 
 
 def test_project_open_state_layer_catalog() -> None:
@@ -101,15 +113,36 @@ def test_plan_execute_dependency_failure() -> None:
     d = _dispatcher()
     plan = _valid_plan()
     plan["steps"][1]["depends_on"] = ["s999"]
+    token = _confirmation_token(d, plan, request_id="req-prev-2")
     try:
         d.handle(
             "plan_execute",
-            {"plan": plan, "dry_run": False, "adapter_mode": "mock"},
+            {
+                "plan": plan,
+                "dry_run": False,
+                "adapter_mode": "mock",
+                "require_confirmation_token": token,
+            },
             request_id="req-exec-2",
             session_id="sess-1",
         )
         assert False, "Expected ValidationError"
     except ValidationError:
+        assert True
+
+
+def test_plan_execute_requires_confirmation_token_for_high_risk() -> None:
+    d = _dispatcher()
+    plan = _valid_plan()
+    try:
+        d.handle(
+            "plan_execute",
+            {"plan": plan, "dry_run": False, "adapter_mode": "mock"},
+            request_id="req-exec-confirm",
+            session_id="sess-1",
+        )
+        assert False, "Expected PreconditionError"
+    except PreconditionError:
         assert True
 
 
@@ -169,6 +202,20 @@ def test_export_result() -> None:
         )
         assert path.exists()
         assert out["exports"][0]["target"] == "lots"
+
+
+def test_execute_code_default_deny() -> None:
+    d = _dispatcher()
+    try:
+        d.handle(
+            "execute_code",
+            {"code": "result = 1 + 1", "_role": "admin"},
+            request_id="req-code",
+            session_id="sess-1",
+        )
+        assert False, "Expected PreconditionError"
+    except PreconditionError:
+        assert True
 
 
 def test_git_snapshot() -> None:

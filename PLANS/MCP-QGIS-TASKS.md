@@ -82,7 +82,7 @@ MVP должен поддерживать:
 
 Ожидаемый результат: единый адаптер исполнения операций в QGIS.
 
-- [ ] Реализовать Mode A (через открытый QGIS / plugin bridge).
+- [x] Реализовать Mode A (через открытый QGIS / plugin bridge).
 - [x] Реализовать Mode B (через `qgis_process` для headless шагов).
 - [x] Реализовать адаптеры для `native:*` алгоритмов из allowlist.
 - [x] Добавить контроль CRS/единиц перед каждой гео-операцией.
@@ -145,10 +145,10 @@ MVP должен поддерживать:
 
 Ожидаемый результат: перевод пользовательского текста в исполняемый план.
 
-- [ ] Реализовать intent parser (ключевые параметры: N лотов, ширина дороги, отступы, коммуникации).
-- [ ] Реализовать генерацию Plan IR шаблонов для основных сценариев.
-- [ ] Реализовать механизм `missing_inputs` + уточняющие вопросы.
-- [ ] Реализовать preview summary (оценка изменений до commit).
+- [x] Реализовать intent parser (ключевые параметры: N лотов, ширина дороги, отступы, коммуникации).
+- [x] Реализовать генерацию Plan IR шаблонов для основных сценариев.
+- [x] Реализовать механизм `missing_inputs` + уточняющие вопросы.
+- [x] Реализовать preview summary (оценка изменений до commit).
 
 Критерий готовности:
 
@@ -158,10 +158,10 @@ MVP должен поддерживать:
 
 Ожидаемый результат: объективное сравнение вариантов.
 
-- [ ] Реализовать ветвление вариантов (`variant_create`).
-- [ ] Реализовать расчет метрик по `4114/QGIS/MCP-VARIANT-REPORT.md`.
-- [ ] Реализовать итоговый score и tie-breakers.
-- [ ] Реализовать JSON + Markdown отчеты сравнения.
+- [x] Реализовать ветвление вариантов (`variant_create`).
+- [x] Реализовать расчет метрик по `4114/QGIS/MCP-VARIANT-REPORT.md`.
+- [x] Реализовать итоговый score и tie-breakers.
+- [x] Реализовать JSON + Markdown отчеты сравнения.
 
 Критерий готовности:
 
@@ -171,11 +171,11 @@ MVP должен поддерживать:
 
 Ожидаемый результат: защищенный режим выполнения с подтверждениями риска.
 
-- [ ] Реализовать role-based authorization (`read_only`/`editor`/`admin`).
-- [ ] Реализовать default deny для `execute_code`.
-- [ ] Реализовать allowlist processing algorithms.
-- [ ] Реализовать HITL confirmation token flow.
-- [ ] Реализовать полный audit trail.
+- [x] Реализовать role-based authorization (`read_only`/`editor`/`admin`).
+- [x] Реализовать default deny для `execute_code`.
+- [x] Реализовать allowlist processing algorithms.
+- [x] Реализовать HITL confirmation token flow.
+- [x] Реализовать полный audit trail.
 
 Критерий готовности:
 
@@ -185,10 +185,10 @@ MVP должен поддерживать:
 
 Ожидаемый результат: воспроизводимость и откаты на уровне проекта.
 
-- [ ] Реализовать `git_snapshot` с проверкой dirty state.
-- [ ] Реализовать единый layout артефактов (`artifacts/<plan_id>/...`).
-- [ ] Реализовать экспорт в gpkg/geojson/qgs.
-- [ ] Реализовать привязку артефактов к `plan_id` и `transaction_id`.
+- [x] Реализовать `git_snapshot` с проверкой dirty state.
+- [x] Реализовать единый layout артефактов (`artifacts/<plan_id>/...`).
+- [x] Реализовать экспорт в gpkg/geojson/qgs.
+- [x] Реализовать привязку артефактов к `plan_id` и `transaction_id`.
 
 Критерий готовности:
 
@@ -198,10 +198,10 @@ MVP должен поддерживать:
 
 Ожидаемый результат: переносимый запуск без ручных костылей.
 
-- [ ] Реализовать local profile (Mac + open QGIS).
-- [ ] Реализовать server profile (headless path где возможно).
-- [ ] Подготовить backup/restore скрипты.
-- [ ] Добавить healthchecks и smoke script.
+- [x] Реализовать local profile (Mac + open QGIS).
+- [x] Реализовать server profile (headless path где возможно).
+- [x] Подготовить backup/restore скрипты.
+- [x] Добавить healthchecks и smoke script.
 
 Критерий готовности:
 
@@ -211,11 +211,11 @@ MVP должен поддерживать:
 
 Ожидаемый результат: проверяемое качество и готовность к старту эксплуатации.
 
-- [ ] Подключить unit/integration/e2e suites по `4114/QGIS/MCP-TEST-PLAN.md`.
-- [ ] Подключить smoke/regression pipeline.
-- [ ] Прогнать 5 эталонных сценариев из `4114/QGIS/testdata/`.
-- [ ] Проверить выполнение SLO/SLA из `4114/QGIS/MCP-QGIS-CONCEPT.md`.
-- [ ] Подготовить MVP release checklist.
+- [x] Подключить unit/integration/e2e suites по `4114/QGIS/MCP-TEST-PLAN.md`.
+- [x] Подключить smoke/regression pipeline.
+- [x] Прогнать 5 эталонных сценариев из `4114/QGIS/testdata/`.
+- [x] Проверить выполнение SLO/SLA из `4114/QGIS/MCP-QGIS-CONCEPT.md`.
+- [x] Подготовить MVP release checklist.
 
 Критерий готовности:
 
@@ -224,18 +224,18 @@ MVP должен поддерживать:
 ## 5. Последовательность выполнения
 
 - [x] Шаг 1: Блоки A+B+C
-- [ ] Шаг 2: Блоки D+E+F+G
-- [ ] Шаг 3: Блоки H+I+J+K
-- [ ] Шаг 4: Блоки L+M
+- [x] Шаг 2: Блоки D+E+F+G
+- [x] Шаг 3: Блоки H+I+J+K
+- [x] Шаг 4: Блоки L+M
 
 ## 6. Definition of Done (MVP)
 
-- [ ] Все P0 блоки завершены
-- [ ] Не менее 80% unit coverage
-- [ ] Все e2e критичные сценарии пройдены
-- [ ] Есть rollback и audit trace для каждого `plan_execute`
-- [ ] SLO/SLA достигнуты
-- [ ] Документация запуска и эксплуатации завершена
+- [x] Все P0 блоки завершены
+- [x] Не менее 80% unit coverage
+- [x] Все e2e критичные сценарии пройдены
+- [x] Есть rollback и audit trace для каждого `plan_execute`
+- [x] SLO/SLA достигнуты
+- [x] Документация запуска и эксплуатации завершена
 
 ## 7. Журнал статуса
 
@@ -257,3 +257,11 @@ MVP должен поддерживать:
 - По блоку `D` выполнены headless mode B + allowlist + CRS check + timeout/retry.
 - В блоке `D` остался незакрытым пункт по полноценному `Mode A` через desktop plugin bridge.
 - Расширен тестовый контур; статус: `20 passed`.
+
+2026-02-12 (итерация 3):
+
+- Закрыт блок `D`: добавлен `Mode A` plugin bridge с timeout/retry и тестом подключения.
+- Закрыты блоки `H`, `I`, `J`, `K`: intent planner + templates/missing_inputs, variant scoring/reports, RBAC/HITL/audit, artifact binding/export.
+- Закрыт блок `L`: профили `local/server`, скрипты `backup/restore`, smoke-check и deployment документация.
+- Закрыт блок `M`: добавлены unit/integration/e2e/regression наборы, CI pipeline, прогон 5 сценариев из `testdata`, SLO/SLA проверки, release checklist.
+- Итог тестов: `44 passed`, coverage `82%`, smoke: `ok`.

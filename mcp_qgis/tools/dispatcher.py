@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import json
@@ -11,7 +12,8 @@ from ..core.state import RuntimeState, ProjectState, VariantState
 from ..core.sessions import SessionManager
 from ..core.locks import LockManager
 from ..core.transactions import TransactionManager
-from ..core.plan import PlanValidator, build_plan_from_intent
+from ..core.plan import PlanValidator
+from ..planner import IntentPlanner
 from ..adapters.qgis_adapter import QGISAdapter
 from ..validators.ruleset import RulesetLoader
 from ..validators.geometry_checks import (
@@ -19,7 +21,10 @@ from ..validators.geometry_checks import (
     evaluate_topology,
     topology_summary_from_payload,
 )
-from ..errors import MCPQGISError, ValidationError, NotFoundError, ConflictError
+from ..security import AuthorizationManager, ConfirmationManager, AuditLogger
+from ..artifacts import ArtifactManager
+from ..variants import compare_variants, write_variant_report
+from ..errors import MCPQGISError, ValidationError, NotFoundError, ConflictError, PreconditionError
 
 
 OP_TO_ALGORITHM = {
@@ -49,9 +54,56 @@ class ToolDispatcher:
         self.locks = locks
         self.tx = tx
         self.plan_validator = plan_validator
-        self.adapter = QGISAdapter(mode="mock")
+
+        self.adapter = QGISAdapter(mode="mock", allowlist=self._load_allowlist())
         self.rulesets = RulesetLoader(Path(__file__).resolve().parents[2] / "rulesets")
+        self.intent_planner = IntentPlanner()
+        self.authz = AuthorizationManager()
+        self.confirm = ConfirmationManager(ttl_minutes=10)
+        self.audit = AuditLogger(settings.data_root / "logs" / "audit.log")
+        self.artifacts = ArtifactManager(settings.data_root)
+
         self._request_cache: dict[str, dict[str, Any]] = {}
+
+    def _load_allowlist(self) -> set[str] | None:
+        if not self.settings.allowed_algorithms_file:
+            return None
+        path = self.settings.allowed_algorithms_file
+        if not path.exists():
+            raise PreconditionError("Allowed algorithms file does not exist", {"path": str(path)})
+        values = {
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+        return values or None
+
+    def _audit(
+        self,
+        *,
+        request_id: str,
+        session_id: str,
+        actor_id: str,
+        role: str,
+        tool: str,
+        payload: dict[str, Any],
+        status: str,
+        error: MCPQGISError | None = None,
+    ) -> None:
+        record: dict[str, Any] = {
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "request_id": request_id,
+            "session_id": session_id,
+            "actor_id": actor_id,
+            "role": role,
+            "tool": tool,
+            "payload_hash": self.audit.payload_hash(payload),
+            "status": status,
+        }
+        if error:
+            record["error_code"] = error.code
+            record["error_message"] = error.message
+        self.audit.write(record)
 
     def handle(self, tool: str, payload: dict[str, Any], request_id: str, session_id: str) -> dict[str, Any]:
         key = request_id
@@ -61,13 +113,53 @@ class ToolDispatcher:
                 raise ConflictError("Same request_id with different payload", {"request_id": request_id})
             return cached["result"]
 
-        self.sessions.upsert(session_id)
+        actor_id = str(payload.get("_actor_id", "system"))
+        role = str(payload.get("_role", "editor"))
+        self.sessions.upsert(session_id, actor_id=actor_id, role=role)
+        self.authz.require(tool, role)
+
         handler = getattr(self, f"tool_{tool}", None)
         if handler is None:
             raise NotFoundError("Tool not found", {"tool": tool})
-        result = handler(payload=payload, request_id=request_id, session_id=session_id)
-        self._request_cache[key] = {"tool": tool, "payload": payload, "result": result}
-        return result
+
+        try:
+            result = handler(payload=payload, request_id=request_id, session_id=session_id, role=role)
+            self._request_cache[key] = {"tool": tool, "payload": payload, "result": result}
+            self._audit(
+                request_id=request_id,
+                session_id=session_id,
+                actor_id=actor_id,
+                role=role,
+                tool=tool,
+                payload=payload,
+                status="ok",
+            )
+            return result
+        except MCPQGISError as err:
+            self._audit(
+                request_id=request_id,
+                session_id=session_id,
+                actor_id=actor_id,
+                role=role,
+                tool=tool,
+                payload=payload,
+                status="error",
+                error=err,
+            )
+            raise
+        except Exception as exc:  # noqa: BLE001
+            wrapped = MCPQGISError("Unhandled dispatcher error", {"error": str(exc)})
+            self._audit(
+                request_id=request_id,
+                session_id=session_id,
+                actor_id=actor_id,
+                role=role,
+                tool=tool,
+                payload=payload,
+                status="error",
+                error=wrapped,
+            )
+            raise
 
     def tool_project_open(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
         project_path = payload.get("project_path")
@@ -87,6 +179,7 @@ class ToolDispatcher:
             dirty=False,
             read_only=read_only,
             layer_count=0,
+            active_transaction=None,
         )
         return {
             "project_id": self.state.project.project_id,
@@ -128,22 +221,43 @@ class ToolDispatcher:
         if not intent_text:
             raise ValidationError("intent_text is required", {"field": "payload.intent_text"})
         constraints = payload.get("constraints", {})
-        plan = build_plan_from_intent(intent_text, constraints)
-        return {"plan": plan, "assumptions": [], "missing_inputs": []}
 
-    def tool_plan_preview(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
+        planned = self.intent_planner.build_plan(intent_text, constraints)
+        return {
+            "plan": planned["plan"],
+            "assumptions": planned["assumptions"],
+            "missing_inputs": planned["missing_inputs"],
+            "intent_type": planned["intent_type"],
+        }
+
+    def _is_high_risk_plan(self, plan: dict[str, Any]) -> bool:
+        if not plan:
+            return False
+        high_risk_ops = {"difference", "move", "commit", "rollback"}
+        return any(step.get("op") in high_risk_ops for step in plan.get("steps", []))
+
+    def tool_plan_preview(self, payload: dict[str, Any], session_id: str, **_: Any) -> dict[str, Any]:
         plan = payload.get("plan")
         if not isinstance(plan, dict):
             raise ValidationError("plan is required", {"field": "payload.plan"})
+
         est_changes = {
-            "new_lots": int(plan.get("context", {}).get("lots_target", 4)),
-            "road_area_m2": 1200,
+            "new_lots": int(plan.get("context", {}).get("lots_target", 0)),
+            "road_area_m2": float(plan.get("context", {}).get("road_width_m", 0)) * 200.0,
             "geometry_updates": len(plan.get("steps", [])),
         }
+        high_risk = self._is_high_risk_plan(plan)
+        token = None
+        if high_risk:
+            token = self.confirm.issue(session_id=session_id, plan_id=plan.get("plan_id", "unknown"))
+
         return {
             "plan_id": plan.get("plan_id", "unknown"),
             "estimated_changes": est_changes,
             "warnings": [],
+            "risk_level": "high" if high_risk else "low",
+            "confirmation_required": high_risk,
+            "confirmation_token": token,
             "render_path": None,
         }
 
@@ -162,15 +276,21 @@ class ToolDispatcher:
 
         return {
             "plan_id": plan.get("plan_id", "unknown"),
-            "valid": schema_valid and len(rule_errors) == 0,
+            "valid": schema_valid and len([e for e in rule_errors if e.get("severity") == "hard"]) == 0,
             "errors": schema_errors + rule_errors,
             "warnings": warnings,
         }
 
-    def tool_plan_execute(self, payload: dict[str, Any], session_id: str, **_: Any) -> dict[str, Any]:
+    def tool_plan_execute(self, payload: dict[str, Any], session_id: str, role: str, **_: Any) -> dict[str, Any]:
         plan = payload.get("plan")
         if not isinstance(plan, dict):
             raise ValidationError("plan is required", {"field": "payload.plan"})
+
+        if self._is_high_risk_plan(plan) and not payload.get("dry_run", False):
+            token = payload.get("require_confirmation_token")
+            if not token:
+                raise PreconditionError("High-risk plan requires confirmation token", {"plan_id": plan.get("plan_id")})
+            self.confirm.validate_and_consume(token, session_id=session_id, plan_id=plan.get("plan_id", "unknown"))
 
         schema_valid, schema_errors = self.plan_validator.validate(plan)
         if not schema_valid:
@@ -185,13 +305,14 @@ class ToolDispatcher:
 
         ruleset_name = payload.get("ruleset", plan.get("ruleset", "cadastre_default"))
         _, rule_errors, _warnings = self._validate_plan_rules(plan, ruleset_name)
-        if rule_errors:
+        hard_errors = [e for e in rule_errors if e.get("severity") == "hard"]
+        if hard_errors:
             return {
                 "plan_id": plan.get("plan_id", "unknown"),
                 "transaction_id": None,
                 "status": "failed_validation",
                 "step_results": [],
-                "errors": rule_errors,
+                "errors": hard_errors,
                 "artifacts": [],
             }
 
@@ -203,6 +324,13 @@ class ToolDispatcher:
         try:
             adapter_mode = payload.get("adapter_mode", "mock")
             self.adapter.mode = adapter_mode
+            self.adapter.timeout_sec = int(payload.get("timeout_sec", self.adapter.timeout_sec))
+            self.adapter.max_attempts = int(payload.get("max_attempts", self.adapter.max_attempts))
+            self.adapter.retry_backoff_sec = float(payload.get("retry_backoff_sec", self.adapter.retry_backoff_sec))
+            if adapter_mode == "mode_a_plugin_bridge":
+                bridge = payload.get("bridge", {})
+                self.adapter.bridge_host = bridge.get("host", "127.0.0.1")
+                self.adapter.bridge_port = int(bridge.get("port", 9876))
 
             for step in plan.get("steps", []):
                 step_id = step["step_id"]
@@ -215,17 +343,31 @@ class ToolDispatcher:
                 self.tx.step(tx.transaction_id, step_id, "running")
                 op = step.get("op")
                 algorithm = OP_TO_ALGORITHM.get(op)
+                algorithm_result: dict[str, Any] | None = None
                 if algorithm:
-                    self.adapter.run_algorithm(algorithm, step.get("params", {}), crs=plan.get("crs", "EPSG:32637"))
+                    algorithm_result = self.adapter.run_algorithm(
+                        algorithm,
+                        step.get("params", {}),
+                        crs=plan.get("crs", "EPSG:32637"),
+                    )
 
-                # postchecks (minimal contract)
+                # postchecks placeholders
                 for check in step.get("postchecks", []):
-                    if check.get("name") == "topology_ok":
+                    if check.get("name") in {"topology_ok", "geometry_valid", "lot_count", "road_width_check", "edge_shifted"}:
                         pass
 
                 self.tx.step(tx.transaction_id, step_id, "done")
                 completed_steps.add(step_id)
-                step_results.append({"step_id": step_id, "status": "done", "duration_ms": 1})
+                step_results.append(
+                    {
+                        "step_id": step_id,
+                        "status": "done",
+                        "duration_ms": 1,
+                        "op": op,
+                        "algorithm": algorithm,
+                        "adapter_result": algorithm_result,
+                    }
+                )
 
             if payload.get("dry_run", False):
                 self.tx.rollback(tx.transaction_id)
@@ -233,6 +375,8 @@ class ToolDispatcher:
             else:
                 self.tx.commit(tx.transaction_id)
                 status = "committed"
+
+            artifacts = self.artifacts.bind_execution_artifacts(plan["plan_id"], tx.transaction_id, step_results)
         except MCPQGISError:
             self.tx.rollback(tx.transaction_id)
             raise
@@ -241,14 +385,32 @@ class ToolDispatcher:
 
         if self.state.project:
             self.state.project.active_transaction = tx.transaction_id
+            self.state.project.dirty = status == "committed"
 
         return {
             "plan_id": plan["plan_id"],
             "transaction_id": tx.transaction_id,
             "status": status,
             "step_results": step_results,
-            "artifacts": [],
+            "artifacts": artifacts,
         }
+
+    def tool_execute_code(self, payload: dict[str, Any], role: str, **_: Any) -> dict[str, Any]:
+        if not self.settings.enable_execute_code:
+            raise PreconditionError(
+                "execute_code is disabled by policy",
+                {"setting": "MCP_ENABLE_EXECUTE_CODE", "enabled": False},
+            )
+        if role != "admin":
+            raise PreconditionError("Only admin can use execute_code", {"role": role})
+        code = payload.get("code")
+        if not isinstance(code, str) or not code.strip():
+            raise ValidationError("code is required", {"field": "payload.code"})
+
+        local_scope: dict[str, Any] = {"result": None}
+        safe_globals = {"__builtins__": {"len": len, "min": min, "max": max, "sum": sum}}
+        exec(code, safe_globals, local_scope)  # noqa: S102
+        return {"result": local_scope.get("result")}
 
     def tool_topology_validate(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
         layer_ids = payload.get("layer_ids")
@@ -257,7 +419,6 @@ class ToolDispatcher:
 
         summary = topology_summary_from_payload(payload)
         valid, issues = evaluate_topology(summary)
-
         return {
             "valid": valid,
             "summary": summary,
@@ -268,6 +429,7 @@ class ToolDispatcher:
         name = payload.get("name")
         if not name:
             raise ValidationError("name is required", {"field": "payload.name"})
+
         variant = VariantState(
             variant_id=name,
             name=name,
@@ -278,7 +440,7 @@ class ToolDispatcher:
         return {
             "variant_id": variant.variant_id,
             "created_from": variant.created_from,
-            "created_at": "2026-02-12T00:00:00Z",
+            "created_at": datetime.now(tz=timezone.utc).isoformat(),
         }
 
     def tool_variant_compare(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
@@ -289,13 +451,23 @@ class ToolDispatcher:
         if not isinstance(metrics, dict) or not metrics:
             raise ValidationError("metrics is required", {"field": "payload.metrics"})
 
-        scores = []
-        base = 1.0 / max(1, len(variant_ids))
-        for idx, vid in enumerate(variant_ids):
-            score = round(base + (len(variant_ids) - idx) * 0.01, 4)
-            scores.append({"variant_id": vid, "score": score})
-        winner = sorted(scores, key=lambda x: x["score"], reverse=True)[0]["variant_id"]
-        return {"winner_variant_id": winner, "scores": scores, "report_path": None}
+        s = sum(float(v) for v in metrics.values())
+        if s <= 0:
+            raise ValidationError("metrics weights sum must be > 0", {"metrics": metrics})
+        weights = {k: float(v) / s for k, v in metrics.items()}
+
+        variant_metrics = payload.get("variant_metrics", {})
+        result = compare_variants(variant_ids=variant_ids, weights=weights, variant_metrics=variant_metrics)
+
+        out_dir = self.artifacts.base / "variant-reports"
+        json_path, md_path = write_variant_report(result, out_dir)
+
+        return {
+            "winner_variant_id": result["winner_variant_id"],
+            "scores": result["scores"],
+            "report_path": str(md_path),
+            "report_json_path": str(json_path),
+        }
 
     def tool_git_snapshot(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
         message = payload.get("message")
@@ -306,20 +478,24 @@ class ToolDispatcher:
         if not (repo / ".git").exists():
             raise NotFoundError("Not a git repository", {"repo_path": str(repo)})
 
+        status_proc = subprocess.run(["git", "status", "--porcelain"], cwd=repo, check=True, capture_output=True, text=True)
+        dirty = bool(status_proc.stdout.strip())
+        if not dirty:
+            rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
+            branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
+            return {"commit": rev.stdout.strip(), "branch": branch.stdout.strip(), "created": False, "dirty": False}
+
         subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True, text=True)
-        commit_proc = subprocess.run(
-            ["git", "commit", "-m", message], cwd=repo, check=False, capture_output=True, text=True
-        )
+        commit_proc = subprocess.run(["git", "commit", "-m", message], cwd=repo, check=False, capture_output=True, text=True)
+
         stderr = commit_proc.stderr.lower()
         stdout = commit_proc.stdout.lower()
         if commit_proc.returncode != 0 and "nothing to commit" not in stderr and "nothing to commit" not in stdout:
             raise MCPQGISError("git commit failed", {"stderr": commit_proc.stderr.strip()})
 
         rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
-        branch = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
-        )
-        return {"commit": rev.stdout.strip(), "branch": branch.stdout.strip(), "created": True}
+        branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
+        return {"commit": rev.stdout.strip(), "branch": branch.stdout.strip(), "created": True, "dirty": True}
 
     def tool_export_result(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
         targets = payload.get("targets")
@@ -332,15 +508,15 @@ class ToolDispatcher:
         if not out_format:
             raise ValidationError("format is required", {"field": "payload.format"})
 
-        path = Path(out_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "format": out_format,
-            "targets": targets,
-            "generated": True,
-        }
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        return {"exports": [{"target": t, "path": str(path), "feature_count": 0} for t in targets]}
+        exports = self.artifacts.export(targets=targets, out_format=out_format, path=Path(out_path))
+
+        plan_id = payload.get("plan_id", "manual-export")
+        transaction_id = payload.get("transaction_id", "none")
+        bind_dir = self.artifacts.plan_dir(plan_id, transaction_id)
+        bind_file = bind_dir / "export-bindings.json"
+        bind_file.write_text(json.dumps({"exports": exports}, indent=2), encoding="utf-8")
+
+        return {"exports": exports, "bindings_path": str(bind_file)}
 
     def _validate_plan_rules(self, plan: dict[str, Any], ruleset_name: str) -> tuple[bool, list[dict[str, Any]], list[dict[str, Any]]]:
         ruleset = self.rulesets.load(ruleset_name)

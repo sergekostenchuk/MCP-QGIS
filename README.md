@@ -9,6 +9,8 @@ Implementation repository for MCP + QGIS cadastre MVP.
 - Schemas: `schemas/`, `PLAN-IR-SCHEMA.json`
 - Tests: `tests/`
 - Reference datasets: `testdata/`
+- Deployment profiles: `deploy/profiles/`
+- Ops scripts: `scripts/`
 
 ## Quick Start
 
@@ -34,8 +36,30 @@ mcp-qgis run
 # tool endpoint: POST http://127.0.0.1:8765/tool
 ```
 
+Run with explicit profile:
+
+```bash
+set -a
+source deploy/profiles/local.env
+set +a
+mcp-qgis run
+```
+
 Run tests:
 
 ```bash
-pytest
+pytest --cov=mcp_qgis --cov-report=term-missing
+```
+
+Run smoke:
+
+```bash
+./scripts/smoke.sh
+```
+
+Backup and restore runtime:
+
+```bash
+./scripts/backup_runtime.sh runtime runtime/backups
+./scripts/restore_runtime.sh runtime/backups/<archive>.tar.gz .
 ```
