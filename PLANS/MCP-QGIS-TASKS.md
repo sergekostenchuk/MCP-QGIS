@@ -221,12 +221,93 @@ MVP должен поддерживать:
 
 - все критичные тесты зелёные, критерии приемки достигнуты.
 
+## Блок N. Live QGIS Integration (Post-MVP)
+
+Ожидаемый результат: MCP реально управляет открытым QGIS-проектом без заглушек.
+
+### N1. QGIS Plugin Bridge Server (P0)
+
+- [ ] Добавить QGIS plugin `mcp_qgis_bridge` с TCP server (`127.0.0.1:9876`) и lifecycle (`start/stop/status`).
+- [ ] Реализовать протокол запроса/ответа JSON (`action`, `algorithm`, `parameters`, `request_id`).
+- [ ] Реализовать исполнение `processing.run(...)` внутри QGIS и сериализацию результата в JSON.
+- [ ] Добавить обработку ошибок bridge-уровня (таймаут, исключение processing, невалидный JSON).
+- [ ] Добавить smoke-проверку bridge (подключение + выполнение `native:fixgeometries` на тестовом слое).
+
+Критерий готовности N1:
+
+- MCP adapter в режиме `mode_a_plugin_bridge` стабильно получает валидный ответ от живого QGIS plugin bridge.
+
+### N2. Реальный Project/Layer State (P0)
+
+- [ ] Перевести `project_open` с файловой заглушки на живой контекст QGIS-проекта через bridge API.
+- [ ] Реализовать `project_state` из реального `QgsProject.instance()` (CRS, dirty, project_path, layers_count).
+- [ ] Реализовать `layer_catalog` по реальным слоям проекта (id, name, geometry, source, fields, feature_count).
+- [ ] Добавить обработку кейсов "проект не открыт"/"слой недоступен"/"источник битый".
+- [ ] Добавить интеграционные тесты на реальный ответ каталога слоев.
+
+Критерий готовности N2:
+
+- `project_open/project_state/layer_catalog` возвращают фактическое состояние открытого QGIS-проекта без моков.
+
+### N3. Mapper Plan IR -> Processing Parameters (P0)
+
+- [ ] Реализовать registry маппинга операций (`split`, `fix`, `buffer`, `difference`, `intersection`, `snap`, `move`) в параметры `native:*`.
+- [ ] Реализовать резолвер логических слоев (`parcel_src`, `lots`, `road_axis`, `utilities`) в реальные layer ids/sources.
+- [ ] Добавить правила для `OUTPUT`-артефактов и промежуточных слоев между шагами.
+- [ ] Добавить preflight-валидацию параметров перед запуском алгоритма.
+- [ ] Добавить unit/integration тесты на корректный маппинг для ключевых сценариев.
+
+Критерий готовности N3:
+
+- любой валидный step из Plan IR исполняется как корректный `processing.run` без ручной правки параметров.
+
+### N4. Client Integration Profiles (P1)
+
+- [ ] Подготовить profile-конфиги подключения к MCP для `Codex`.
+- [ ] Подготовить profile-конфиги подключения к MCP для `Claude Code`.
+- [ ] Подготовить profile-конфиги подключения к MCP для `Antigravity`.
+- [ ] Добавить единый workflow вызова tool-chain: `intent_to_plan -> plan_preview -> plan_validate -> plan_execute`.
+- [ ] Добавить troubleshooting раздел по типовым ошибкам подключения/доступа.
+
+Критерий готовности N4:
+
+- каждый из трех клиентов может вызвать MCP tools в одинаковом рабочем сценарии.
+
+### N5. Live End-to-End on Open QGIS (P0)
+
+- [ ] Прогнать сценарий `project_open -> layer_catalog -> intent_to_plan -> plan_preview -> plan_execute(adapter_mode=mode_a_plugin_bridge)`.
+- [ ] Проверить, что изменения геометрии реально появились в QGIS canvas и в атрибутах слоя.
+- [ ] Проверить наличие `audit log`, `tx log`, `artifacts/<plan_id>/<tx_id>/...` после выполнения.
+- [ ] Проверить rollback на инжектированной ошибке в середине плана.
+- [ ] Зафиксировать протокол прогона (дата, проект, вход, результат, ошибки/наблюдения).
+
+Критерий готовности N5:
+
+- подтверждено живым прогоном, что команда из модели изменяет открытый QGIS-проект и оставляет полный trace.
+
+### N6. Stabilization & Go-Live Gate (P1)
+
+- [ ] Добавить regression-набор для bridge-сценариев (минимум 3 повторяемых прогона).
+- [ ] Добавить performance baseline для `mode_a_plugin_bridge` (p95 на preview/execute).
+- [ ] Добавить release-checklist для live-режима (MCP + plugin + client profile).
+- [ ] Провести dry-go-live с чеклистом и зафиксировать результаты.
+- [ ] Утвердить критерии перехода в "рабочий режим" и дату первой эксплуатации.
+
+Критерий готовности N6:
+
+- live-режим имеет формальный gate и подтвержденную стабильность перед эксплуатацией.
+
+Критерий готовности:
+
+- команда из модели меняет геометрию в открытом QGIS-проекте и оставляет валидный trace (audit + artifacts + tx log).
+
 ## 5. Последовательность выполнения
 
 - [x] Шаг 1: Блоки A+B+C
 - [x] Шаг 2: Блоки D+E+F+G
 - [x] Шаг 3: Блоки H+I+J+K
 - [x] Шаг 4: Блоки L+M
+- [ ] Шаг 5: Блок N (Live QGIS Integration)
 
 ## 6. Definition of Done (MVP)
 
