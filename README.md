@@ -86,18 +86,9 @@ Smoke:
 ./scripts/restore_runtime.sh runtime/backups/<archive>.tar.gz .
 ```
 
-## Публикация в GitHub
+## Вклад в проект
 
-```bash
-git remote add origin git@github.com:<your-user>/<your-repo>.git
-git push -u origin main
-```
-
-Перед публикацией рекомендуется:
-
-- Проверить `git status` (чистый рабочий каталог).
-- Проверить отсутствие локальных секретов/приватных данных в коммитах.
-- Прогнать `pytest`.
+Инструкции для разработки и публикации изменений: `CONTRIBUTING.md`.
 
 ## Лицензия
 
