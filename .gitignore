@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# MCP/QGIS runtime artifacts
+artifacts/
+logs/
+*.log
+
+# Temp
+.tmp/
+tmp/
