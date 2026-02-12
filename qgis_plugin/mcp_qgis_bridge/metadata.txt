@@ -1,0 +1,14 @@
+[general]
+name=MCP QGIS Bridge
+qgisMinimumVersion=3.28
+description=TCP bridge for MCP control of open QGIS session
+version=0.1.0
+author=MCP-QGIS
+email=devnull@example.com
+about=Provides JSON TCP bridge to run processing and read project/layer state.
+tracker=https://example.invalid/mcp-qgis
+repository=https://example.invalid/mcp-qgis
+category=Plugins
+icon=icon.png
+experimental=True
+deprecated=False

@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import subprocess
+from typing import Any
 
 from mcp_qgis.config import load_settings
-from mcp_qgis.core.state import RuntimeState
+from mcp_qgis.core.state import RuntimeState, ProjectState
 from mcp_qgis.core.sessions import SessionManager
 from mcp_qgis.core.locks import LockManager
 from mcp_qgis.core.transactions import TransactionManager
@@ -71,6 +72,67 @@ def test_project_open_state_layer_catalog() -> None:
         assert len(catalog["layers"]) >= 1
 
 
+def test_project_open_state_layer_catalog_via_bridge(monkeypatch: Any) -> None:
+    d = _dispatcher()
+
+    def _open_project(project_path: str, read_only: bool = False) -> dict[str, Any]:
+        assert project_path == "/virtual/demo.qgz"
+        return {"status": "ok", "project_path": project_path, "crs": "EPSG:32637", "dirty": False, "layer_count": 2}
+
+    def _project_state() -> dict[str, Any]:
+        return {"status": "ok", "project_path": "/virtual/demo.qgz", "crs": "EPSG:32637", "dirty": True, "layer_count": 2}
+
+    def _layer_catalog() -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "layers": [
+                {
+                    "layer_id": "L1",
+                    "name": "parcel_src",
+                    "geometry_type": "Polygon",
+                    "feature_count": 1,
+                    "is_valid": True,
+                    "fields": [],
+                },
+                {
+                    "layer_id": "L2",
+                    "name": "road_axis",
+                    "geometry_type": "LineString",
+                    "feature_count": 1,
+                    "is_valid": True,
+                    "fields": [],
+                },
+            ],
+        }
+
+    monkeypatch.setattr(d.adapter, "open_project", _open_project)
+    monkeypatch.setattr(d.adapter, "project_state", _project_state)
+    monkeypatch.setattr(d.adapter, "layer_catalog", _layer_catalog)
+
+    opened = d.handle(
+        "project_open",
+        {
+            "project_path": "/virtual/demo.qgz",
+            "adapter_mode": "mode_a_plugin_bridge",
+            "bridge": {"host": "127.0.0.1", "port": 9876},
+        },
+        request_id="req-open-live",
+        session_id="sess-live",
+    )
+    assert opened["adapter_mode"] == "mode_a_plugin_bridge"
+    assert opened["layer_count"] == 2
+
+    state = d.handle("project_state", {}, request_id="req-state-live", session_id="sess-live")
+    assert state["dirty"] is True
+    assert state["layer_count"] == 2
+
+    catalog = d.handle("layer_catalog", {}, request_id="req-cat-live", session_id="sess-live")
+    assert len(catalog["layers"]) == 2
+    assert d.state.project is not None
+    assert d.state.project.layer_aliases.get("parcel_src") == "L1"
+    assert d.state.project.layer_aliases.get("road_axis") == "L2"
+
+
 def test_intent_to_plan_then_validate() -> None:
     d = _dispatcher()
     out = d.handle(
@@ -107,6 +169,37 @@ def test_plan_execute_dry_run() -> None:
         session_id="sess-1",
     )
     assert out["status"] == "rolled_back"
+
+
+def test_plan_execute_uses_mapped_processing_params(monkeypatch: Any) -> None:
+    d = _dispatcher()
+    d.state.project = ProjectState(
+        project_id="p1",
+        project_path="/tmp/demo.qgs",
+        crs="EPSG:32637",
+        adapter_mode="mock",
+        layer_aliases={"parcel_src": "LAYER_PARCEL", "road_axis": "LAYER_ROAD"},
+    )
+    plan = _valid_plan()
+    captured: list[dict[str, Any]] = []
+
+    def _run_algorithm(algorithm: str, parameters: dict[str, Any], crs: str = "EPSG:32637") -> dict[str, Any]:
+        captured.append({"algorithm": algorithm, "parameters": parameters, "crs": crs})
+        return {"status": "ok", "result": {"OUTPUT": parameters.get("OUTPUT", "memory:out")}}
+
+    monkeypatch.setattr(d.adapter, "run_algorithm", _run_algorithm)
+
+    out = d.handle(
+        "plan_execute",
+        {"plan": plan, "dry_run": True, "adapter_mode": "mock"},
+        request_id="req-exec-map",
+        session_id="sess-1",
+    )
+
+    assert out["status"] == "rolled_back"
+    assert captured[0]["parameters"]["INPUT"] == "LAYER_PARCEL"
+    assert captured[1]["parameters"]["LINES"] == "LAYER_ROAD"
+    assert captured[2]["parameters"]["DISTANCE"] == 3.0
 
 
 def test_plan_execute_dependency_failure() -> None:

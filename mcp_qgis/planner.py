@@ -105,7 +105,7 @@ class IntentPlanner:
                         {
                             "step_id": "s2",
                             "op": "split",
-                            "inputs": {"layer": "parcel_src"},
+                            "inputs": {"layer": "parcel_src", "splitter": "road_axis"},
                             "params": {"lots_target": lots_target},
                             "prechecks": [],
                             "postchecks": [{"name": "lot_count"}],
@@ -186,7 +186,7 @@ class IntentPlanner:
                         {
                             "step_id": "s1",
                             "op": "intersection",
-                            "inputs": {"layer": "lots"},
+                            "inputs": {"layer": f"lot_{a.lower()}", "overlay": f"lot_{b.lower()}"},
                             "params": {"boundary_pair": f"{a}/{b}"},
                             "prechecks": [],
                             "postchecks": [{"name": "common_edge_found"}],
@@ -199,7 +199,7 @@ class IntentPlanner:
                         {
                             "step_id": "s2",
                             "op": "move",
-                            "inputs": {"layer": "common_edge"},
+                            "inputs": {"layer": "s1"},
                             "params": {"distance_m": shift},
                             "prechecks": [],
                             "postchecks": [{"name": "edge_shifted"}],

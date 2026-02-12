@@ -227,11 +227,11 @@ MVP должен поддерживать:
 
 ### N1. QGIS Plugin Bridge Server (P0)
 
-- [ ] Добавить QGIS plugin `mcp_qgis_bridge` с TCP server (`127.0.0.1:9876`) и lifecycle (`start/stop/status`).
-- [ ] Реализовать протокол запроса/ответа JSON (`action`, `algorithm`, `parameters`, `request_id`).
-- [ ] Реализовать исполнение `processing.run(...)` внутри QGIS и сериализацию результата в JSON.
-- [ ] Добавить обработку ошибок bridge-уровня (таймаут, исключение processing, невалидный JSON).
-- [ ] Добавить smoke-проверку bridge (подключение + выполнение `native:fixgeometries` на тестовом слое).
+- [x] Добавить QGIS plugin `mcp_qgis_bridge` с TCP server (`127.0.0.1:9876`) и lifecycle (`start/stop/status`).
+- [x] Реализовать протокол запроса/ответа JSON (`action`, `algorithm`, `parameters`, `request_id`).
+- [x] Реализовать исполнение `processing.run(...)` внутри QGIS и сериализацию результата в JSON.
+- [x] Добавить обработку ошибок bridge-уровня (таймаут, исключение processing, невалидный JSON).
+- [x] Добавить smoke-проверку bridge (подключение + выполнение `native:fixgeometries` на тестовом слое).
 
 Критерий готовности N1:
 
@@ -239,11 +239,11 @@ MVP должен поддерживать:
 
 ### N2. Реальный Project/Layer State (P0)
 
-- [ ] Перевести `project_open` с файловой заглушки на живой контекст QGIS-проекта через bridge API.
-- [ ] Реализовать `project_state` из реального `QgsProject.instance()` (CRS, dirty, project_path, layers_count).
-- [ ] Реализовать `layer_catalog` по реальным слоям проекта (id, name, geometry, source, fields, feature_count).
-- [ ] Добавить обработку кейсов "проект не открыт"/"слой недоступен"/"источник битый".
-- [ ] Добавить интеграционные тесты на реальный ответ каталога слоев.
+- [x] Перевести `project_open` с файловой заглушки на живой контекст QGIS-проекта через bridge API.
+- [x] Реализовать `project_state` из реального `QgsProject.instance()` (CRS, dirty, project_path, layers_count).
+- [x] Реализовать `layer_catalog` по реальным слоям проекта (id, name, geometry, source, fields, feature_count).
+- [x] Добавить обработку кейсов "проект не открыт"/"слой недоступен"/"источник битый".
+- [x] Добавить интеграционные тесты на реальный ответ каталога слоев.
 
 Критерий готовности N2:
 
@@ -251,11 +251,11 @@ MVP должен поддерживать:
 
 ### N3. Mapper Plan IR -> Processing Parameters (P0)
 
-- [ ] Реализовать registry маппинга операций (`split`, `fix`, `buffer`, `difference`, `intersection`, `snap`, `move`) в параметры `native:*`.
-- [ ] Реализовать резолвер логических слоев (`parcel_src`, `lots`, `road_axis`, `utilities`) в реальные layer ids/sources.
-- [ ] Добавить правила для `OUTPUT`-артефактов и промежуточных слоев между шагами.
-- [ ] Добавить preflight-валидацию параметров перед запуском алгоритма.
-- [ ] Добавить unit/integration тесты на корректный маппинг для ключевых сценариев.
+- [x] Реализовать registry маппинга операций (`split`, `fix`, `buffer`, `difference`, `intersection`, `snap`, `move`) в параметры `native:*`.
+- [x] Реализовать резолвер логических слоев (`parcel_src`, `lots`, `road_axis`, `utilities`) в реальные layer ids/sources.
+- [x] Добавить правила для `OUTPUT`-артефактов и промежуточных слоев между шагами.
+- [x] Добавить preflight-валидацию параметров перед запуском алгоритма.
+- [x] Добавить unit/integration тесты на корректный маппинг для ключевых сценариев.
 
 Критерий готовности N3:
 
@@ -263,11 +263,11 @@ MVP должен поддерживать:
 
 ### N4. Client Integration Profiles (P1)
 
-- [ ] Подготовить profile-конфиги подключения к MCP для `Codex`.
-- [ ] Подготовить profile-конфиги подключения к MCP для `Claude Code`.
-- [ ] Подготовить profile-конфиги подключения к MCP для `Antigravity`.
-- [ ] Добавить единый workflow вызова tool-chain: `intent_to_plan -> plan_preview -> plan_validate -> plan_execute`.
-- [ ] Добавить troubleshooting раздел по типовым ошибкам подключения/доступа.
+- [x] Подготовить profile-конфиги подключения к MCP для `Codex`.
+- [x] Подготовить profile-конфиги подключения к MCP для `Claude Code`.
+- [x] Подготовить profile-конфиги подключения к MCP для `Antigravity`.
+- [x] Добавить единый workflow вызова tool-chain: `intent_to_plan -> plan_preview -> plan_validate -> plan_execute`.
+- [x] Добавить troubleshooting раздел по типовым ошибкам подключения/доступа.
 
 Критерий готовности N4:
 
@@ -346,3 +346,12 @@ MVP должен поддерживать:
 - Закрыт блок `L`: профили `local/server`, скрипты `backup/restore`, smoke-check и deployment документация.
 - Закрыт блок `M`: добавлены unit/integration/e2e/regression наборы, CI pipeline, прогон 5 сценариев из `testdata`, SLO/SLA проверки, release checklist.
 - Итог тестов: `44 passed`, coverage `82%`, smoke: `ok`.
+
+2026-02-12 (итерация 4):
+
+- Для блока `N` реализован QGIS plugin bridge: `qgis_plugin/mcp_qgis_bridge` (actions: `ping/open_project/project_state/layer_catalog/run_algorithm`).
+- Расширен MCP adapter и dispatcher для живых bridge-операций `project_open/project_state/layer_catalog`.
+- Добавлен `PlanStepMapper` и интеграция в `plan_execute` (map `Plan IR -> native:*` + резолвер логических слоев и промежуточных OUTPUT).
+- Добавлены профили клиентов: `deploy/clients/*` + документация `docs/PLUGIN-BRIDGE.md` и `docs/CLIENT-INTEGRATION.md`.
+- Добавлены тесты bridge/mapping; статус: `51 passed`, smoke: `ok`.
+- Открытые пункты: `N5` (живой e2e в реальном QGIS GUI) и `N6` (go-live gate) требуют запуска на рабочем QGIS окружении.

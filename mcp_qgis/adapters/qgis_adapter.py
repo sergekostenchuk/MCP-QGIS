@@ -92,12 +92,71 @@ class QGISAdapter:
             }
 
         if self.mode == "mode_a_plugin_bridge":
-            return self._run_plugin_bridge(algorithm, parameters)
+            bridge_response = self.bridge_request("run_algorithm", {"algorithm": algorithm, "parameters": parameters})
+            return {
+                "algorithm": algorithm,
+                "parameters": parameters,
+                "mode": self.mode,
+                "status": str(bridge_response.get("status", "ok")),
+                "attempts": int(bridge_response.get("attempts", 1)),
+                "result": bridge_response,
+            }
 
         if self.mode == "mode_b_qgis_process":
             return self._run_qgis_process(algorithm, parameters)
 
         raise PreconditionError("Unsupported adapter mode", {"mode": self.mode})
+
+    def open_project(self, project_path: str, read_only: bool = False) -> dict[str, Any]:
+        if self.mode == "mock":
+            return {
+                "status": "simulated",
+                "project_path": project_path,
+                "read_only": read_only,
+                "crs": "EPSG:32637",
+                "layer_count": 1,
+            }
+        if self.mode != "mode_a_plugin_bridge":
+            raise PreconditionError("open_project requires mode_a_plugin_bridge", {"mode": self.mode})
+        return self.bridge_request("open_project", {"project_path": project_path, "read_only": read_only})
+
+    def project_state(self) -> dict[str, Any]:
+        if self.mode == "mock":
+            return {
+                "status": "simulated",
+                "project_path": None,
+                "crs": "EPSG:32637",
+                "dirty": False,
+                "layer_count": 1,
+            }
+        if self.mode != "mode_a_plugin_bridge":
+            raise PreconditionError("project_state requires mode_a_plugin_bridge", {"mode": self.mode})
+        return self.bridge_request("project_state", {})
+
+    def layer_catalog(self) -> dict[str, Any]:
+        if self.mode == "mock":
+            return {
+                "status": "simulated",
+                "layers": [
+                    {
+                        "layer_id": "parcel_src",
+                        "name": "parcel_src",
+                        "role": "parcel",
+                        "geometry_type": "Polygon",
+                        "feature_count": 1,
+                        "is_valid": True,
+                        "fields": [{"name": "parcel_id", "type": "string"}],
+                    }
+                ],
+            }
+        if self.mode != "mode_a_plugin_bridge":
+            raise PreconditionError("layer_catalog requires mode_a_plugin_bridge", {"mode": self.mode})
+        return self.bridge_request("layer_catalog", {})
+
+    def bridge_request(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.mode != "mode_a_plugin_bridge":
+            raise PreconditionError("Bridge request requires mode_a_plugin_bridge", {"mode": self.mode})
+        return self._call_plugin_bridge(action, payload)
 
     def _run_qgis_process(self, algorithm: str, parameters: dict[str, Any]) -> dict[str, Any]:
         bin_path = self.default_qgis_process_bin()
@@ -150,14 +209,10 @@ class QGISAdapter:
             {"algorithm": algorithm, "attempts": attempts, "error": last_error},
         )
 
-    def _run_plugin_bridge(self, algorithm: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    def _call_plugin_bridge(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         attempts = 0
         last_error = ""
-        request = {
-            "action": "run_algorithm",
-            "algorithm": algorithm,
-            "parameters": parameters,
-        }
+        request = {"action": action, **payload}
 
         while attempts < self.max_attempts:
             attempts += 1
@@ -190,13 +245,8 @@ class QGISAdapter:
                     if status not in {"ok", "simulated"}:
                         last_error = str(parsed.get("error") or parsed.get("message") or "bridge returned error status")
                     else:
-                        return {
-                            "algorithm": algorithm,
-                            "mode": self.mode,
-                            "attempts": attempts,
-                            "status": status,
-                            "result": parsed,
-                        }
+                        parsed["attempts"] = attempts
+                        return parsed
             except (OSError, TimeoutError) as exc:
                 last_error = str(exc)
             finally:
@@ -209,7 +259,7 @@ class QGISAdapter:
         raise MCPQGISError(
             "plugin bridge execution failed",
             {
-                "algorithm": algorithm,
+                "action": action,
                 "host": self.bridge_host,
                 "port": self.bridge_port,
                 "attempts": attempts,

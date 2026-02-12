@@ -1,0 +1,7 @@
+{
+  "name": "mcp-qgis",
+  "type": "external-mcp",
+  "url": "http://127.0.0.1:8765/tool",
+  "health_url": "http://127.0.0.1:8765/health",
+  "notes": "Use adapter_mode=mode_a_plugin_bridge for live QGIS execution"
+}

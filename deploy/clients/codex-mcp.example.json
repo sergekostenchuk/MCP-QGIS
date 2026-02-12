@@ -1,0 +1,11 @@
+{
+  "name": "mcp-qgis",
+  "command": "mcp-qgis",
+  "args": ["run"],
+  "env": {
+    "MCP_PROFILE": "local",
+    "MCP_HOST": "127.0.0.1",
+    "MCP_PORT": "8765"
+  },
+  "base_url": "http://127.0.0.1:8765/tool"
+}

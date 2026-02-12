@@ -1,0 +1,9 @@
+{
+  "name": "mcp-qgis",
+  "transport": "http",
+  "endpoint": "http://127.0.0.1:8765/tool",
+  "healthcheck": "http://127.0.0.1:8765/health",
+  "env": {
+    "MCP_PROFILE": "local"
+  }
+}

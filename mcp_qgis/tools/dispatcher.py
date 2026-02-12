@@ -14,6 +14,7 @@ from ..core.locks import LockManager
 from ..core.transactions import TransactionManager
 from ..core.plan import PlanValidator
 from ..planner import IntentPlanner
+from ..plan_mapper import PlanStepMapper
 from ..adapters.qgis_adapter import QGISAdapter
 from ..validators.ruleset import RulesetLoader
 from ..validators.geometry_checks import (
@@ -58,6 +59,7 @@ class ToolDispatcher:
         self.adapter = QGISAdapter(mode="mock", allowlist=self._load_allowlist())
         self.rulesets = RulesetLoader(Path(__file__).resolve().parents[2] / "rulesets")
         self.intent_planner = IntentPlanner()
+        self.step_mapper = PlanStepMapper()
         self.authz = AuthorizationManager()
         self.confirm = ConfirmationManager(ttl_minutes=10)
         self.audit = AuditLogger(settings.data_root / "logs" / "audit.log")
@@ -77,6 +79,84 @@ class ToolDispatcher:
             if line.strip() and not line.strip().startswith("#")
         }
         return values or None
+
+    def _configure_adapter(self, payload: dict[str, Any], default_mode: str = "mock") -> str:
+        adapter_mode = str(payload.get("adapter_mode", default_mode))
+        self.adapter.mode = adapter_mode
+        self.adapter.timeout_sec = int(payload.get("timeout_sec", self.adapter.timeout_sec))
+        self.adapter.max_attempts = int(payload.get("max_attempts", self.adapter.max_attempts))
+        self.adapter.retry_backoff_sec = float(payload.get("retry_backoff_sec", self.adapter.retry_backoff_sec))
+        if adapter_mode == "mode_a_plugin_bridge":
+            bridge = payload.get("bridge", {})
+            self.adapter.bridge_host = str(bridge.get("host", "127.0.0.1"))
+            self.adapter.bridge_port = int(bridge.get("port", 9876))
+        return adapter_mode
+
+    @staticmethod
+    def _build_layer_aliases(layers: list[dict[str, Any]]) -> dict[str, str]:
+        aliases: dict[str, str] = {}
+        for layer in layers:
+            layer_id = str(layer.get("layer_id", ""))
+            name = str(layer.get("name", ""))
+            if not layer_id:
+                continue
+
+            normalized_name = name.strip().lower()
+            if normalized_name:
+                aliases[normalized_name] = layer_id
+
+            role = str(layer.get("role", "")).strip().lower()
+            if role:
+                aliases[role] = layer_id
+
+            if "parcel" in normalized_name or "участ" in normalized_name:
+                aliases.setdefault("parcel_src", layer_id)
+            if "lot" in normalized_name or "лот" in normalized_name:
+                aliases.setdefault("lots", layer_id)
+            if "road" in normalized_name or "дорог" in normalized_name:
+                aliases.setdefault("road_axis", layer_id)
+                aliases.setdefault("road_corridor", layer_id)
+            if "util" in normalized_name or "коммун" in normalized_name or "сеть" in normalized_name:
+                aliases.setdefault("utilities", layer_id)
+        return aliases
+
+    def _resolve_layer_ref(self, ref: str, outputs: dict[str, str]) -> str:
+        if ref in outputs:
+            return outputs[ref]
+        if self.state.project:
+            aliases = self.state.project.layer_aliases
+            if ref in aliases:
+                return aliases[ref]
+            lower = ref.lower()
+            if lower in aliases:
+                return aliases[lower]
+        return ref
+
+    @staticmethod
+    def _extract_output_reference(step_id: str, mapped_params: dict[str, Any], adapter_result: dict[str, Any] | None) -> str | None:
+        fallback = mapped_params.get("OUTPUT")
+        if not adapter_result:
+            return str(fallback) if fallback else None
+
+        result_block = adapter_result.get("result")
+        candidates: list[dict[str, Any]] = []
+        if isinstance(result_block, dict):
+            candidates.append(result_block)
+            nested = result_block.get("result")
+            if isinstance(nested, dict):
+                candidates.append(nested)
+            nested_results = result_block.get("results")
+            if isinstance(nested_results, dict):
+                candidates.append(nested_results)
+
+        for candidate in candidates:
+            for key in ("OUTPUT", "output", "OUTPUT_LAYER", "sink"):
+                if key in candidate and candidate[key]:
+                    return str(candidate[key])
+
+        if fallback:
+            return str(fallback)
+        return f"memory:{step_id}"
 
     def _audit(
         self,
@@ -167,19 +247,41 @@ class ToolDispatcher:
             raise ValidationError("project_path is required", {"field": "payload.project_path"})
         read_only = bool(payload.get("read_only", False))
         crs = payload.get("target_crs", "EPSG:32637")
+        adapter_mode = self._configure_adapter(payload, default_mode="mock")
 
-        path = Path(project_path)
-        if not path.exists():
-            raise NotFoundError("Project file not found", {"project_path": project_path})
+        layer_count = 0
+        bridge_host = None
+        bridge_port = None
+        layer_aliases: dict[str, str] = {}
+
+        if adapter_mode == "mode_a_plugin_bridge":
+            opened = self.adapter.open_project(str(project_path), read_only=read_only)
+            crs = str(opened.get("crs", crs))
+            layer_count = int(opened.get("layer_count", 0))
+            bridge_host = self.adapter.bridge_host
+            bridge_port = self.adapter.bridge_port
+            catalog = self.adapter.layer_catalog()
+            layers = catalog.get("layers", [])
+            if isinstance(layers, list):
+                layer_count = max(layer_count, len(layers))
+                layer_aliases = self._build_layer_aliases([l for l in layers if isinstance(l, dict)])
+        else:
+            path = Path(project_path)
+            if not path.exists():
+                raise NotFoundError("Project file not found", {"project_path": project_path})
 
         self.state.project = ProjectState(
             project_id=str(uuid4()),
-            project_path=str(path),
-            crs=crs,
+            project_path=str(project_path),
+            crs=str(crs),
             dirty=False,
             read_only=read_only,
-            layer_count=0,
+            layer_count=layer_count,
             active_transaction=None,
+            adapter_mode=adapter_mode,
+            bridge_host=bridge_host,
+            bridge_port=bridge_port,
+            layer_aliases=layer_aliases,
         )
         return {
             "project_id": self.state.project.project_id,
@@ -187,11 +289,32 @@ class ToolDispatcher:
             "crs": self.state.project.crs,
             "layer_count": self.state.project.layer_count,
             "read_only": self.state.project.read_only,
+            "adapter_mode": self.state.project.adapter_mode,
+            "bridge_host": self.state.project.bridge_host,
+            "bridge_port": self.state.project.bridge_port,
         }
 
     def tool_project_state(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
         if not self.state.project:
             raise NotFoundError("No active project", {})
+        if self.state.project.adapter_mode == "mode_a_plugin_bridge":
+            self._configure_adapter(
+                {
+                    "adapter_mode": "mode_a_plugin_bridge",
+                    "bridge": {
+                        "host": self.state.project.bridge_host or "127.0.0.1",
+                        "port": self.state.project.bridge_port or 9876,
+                    },
+                },
+                default_mode="mode_a_plugin_bridge",
+            )
+            live_state = self.adapter.project_state()
+            self.state.project.crs = str(live_state.get("crs", self.state.project.crs))
+            self.state.project.dirty = bool(live_state.get("dirty", self.state.project.dirty))
+            self.state.project.layer_count = int(live_state.get("layer_count", self.state.project.layer_count))
+            live_path = live_state.get("project_path")
+            if live_path:
+                self.state.project.project_path = str(live_path)
         return {
             "project_id": self.state.project.project_id,
             "project_path": self.state.project.project_path,
@@ -199,9 +322,30 @@ class ToolDispatcher:
             "dirty": self.state.project.dirty,
             "active_transaction": self.state.project.active_transaction,
             "open_variants": list(self.state.variants.keys()),
+            "layer_count": self.state.project.layer_count,
+            "adapter_mode": self.state.project.adapter_mode,
         }
 
     def tool_layer_catalog(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
+        if self.state.project and self.state.project.adapter_mode == "mode_a_plugin_bridge":
+            self._configure_adapter(
+                {
+                    "adapter_mode": "mode_a_plugin_bridge",
+                    "bridge": {
+                        "host": self.state.project.bridge_host or "127.0.0.1",
+                        "port": self.state.project.bridge_port or 9876,
+                    },
+                },
+                default_mode="mode_a_plugin_bridge",
+            )
+            catalog = self.adapter.layer_catalog()
+            layers = catalog.get("layers", [])
+            if isinstance(layers, list):
+                typed_layers = [l for l in layers if isinstance(l, dict)]
+                self.state.project.layer_count = len(typed_layers)
+                self.state.project.layer_aliases = self._build_layer_aliases(typed_layers)
+                return {"layers": typed_layers}
+
         return {
             "layers": [
                 {
@@ -320,17 +464,10 @@ class ToolDispatcher:
         tx = self.tx.begin(plan_id=plan["plan_id"], session_id=session_id)
         step_results = []
         completed_steps: set[str] = set()
+        intermediate_outputs: dict[str, str] = {}
 
         try:
-            adapter_mode = payload.get("adapter_mode", "mock")
-            self.adapter.mode = adapter_mode
-            self.adapter.timeout_sec = int(payload.get("timeout_sec", self.adapter.timeout_sec))
-            self.adapter.max_attempts = int(payload.get("max_attempts", self.adapter.max_attempts))
-            self.adapter.retry_backoff_sec = float(payload.get("retry_backoff_sec", self.adapter.retry_backoff_sec))
-            if adapter_mode == "mode_a_plugin_bridge":
-                bridge = payload.get("bridge", {})
-                self.adapter.bridge_host = bridge.get("host", "127.0.0.1")
-                self.adapter.bridge_port = int(bridge.get("port", 9876))
+            adapter_mode = self._configure_adapter(payload, default_mode="mock")
 
             for step in plan.get("steps", []):
                 step_id = step["step_id"]
@@ -345,11 +482,19 @@ class ToolDispatcher:
                 algorithm = OP_TO_ALGORITHM.get(op)
                 algorithm_result: dict[str, Any] | None = None
                 if algorithm:
+                    mapped_params = self.step_mapper.map_step(
+                        step,
+                        resolve_layer=lambda ref: self._resolve_layer_ref(ref, intermediate_outputs),
+                        default_output=f"memory:{step_id}",
+                    )
                     algorithm_result = self.adapter.run_algorithm(
                         algorithm,
-                        step.get("params", {}),
+                        mapped_params,
                         crs=plan.get("crs", "EPSG:32637"),
                     )
+                    output_ref = self._extract_output_reference(step_id, mapped_params, algorithm_result)
+                    if output_ref:
+                        intermediate_outputs[step_id] = output_ref
 
                 # postchecks placeholders
                 for check in step.get("postchecks", []):

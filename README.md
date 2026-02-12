@@ -10,7 +10,9 @@ Implementation repository for MCP + QGIS cadastre MVP.
 - Tests: `tests/`
 - Reference datasets: `testdata/`
 - Deployment profiles: `deploy/profiles/`
+- Client integration profiles: `deploy/clients/`
 - Ops scripts: `scripts/`
+- QGIS plugin bridge: `qgis_plugin/mcp_qgis_bridge/`
 
 ## Quick Start
 
@@ -56,6 +58,11 @@ Run smoke:
 ```bash
 ./scripts/smoke.sh
 ```
+
+Live QGIS bridge docs:
+
+- `docs/PLUGIN-BRIDGE.md`
+- `docs/CLIENT-INTEGRATION.md`
 
 Backup and restore runtime:
 

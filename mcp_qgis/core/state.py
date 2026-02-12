@@ -13,6 +13,10 @@ class ProjectState:
     read_only: bool = False
     layer_count: int = 0
     active_transaction: str | None = None
+    adapter_mode: str = "mock"
+    bridge_host: str | None = None
+    bridge_port: int | None = None
+    layer_aliases: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
