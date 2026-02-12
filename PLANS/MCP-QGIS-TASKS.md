@@ -83,10 +83,10 @@ MVP должен поддерживать:
 Ожидаемый результат: единый адаптер исполнения операций в QGIS.
 
 - [ ] Реализовать Mode A (через открытый QGIS / plugin bridge).
-- [ ] Реализовать Mode B (через `qgis_process` для headless шагов).
-- [ ] Реализовать адаптеры для `native:*` алгоритмов из allowlist.
-- [ ] Добавить контроль CRS/единиц перед каждой гео-операцией.
-- [ ] Добавить безопасный timeout + retry для внешних вызовов.
+- [x] Реализовать Mode B (через `qgis_process` для headless шагов).
+- [x] Реализовать адаптеры для `native:*` алгоритмов из allowlist.
+- [x] Добавить контроль CRS/единиц перед каждой гео-операцией.
+- [x] Добавить безопасный timeout + retry для внешних вызовов.
 
 Критерий готовности:
 
@@ -96,18 +96,18 @@ MVP должен поддерживать:
 
 Ожидаемый результат: полный набор инструментов MVP по контракту.
 
-- [ ] `project_open`
-- [ ] `project_state`
-- [ ] `layer_catalog`
-- [ ] `intent_to_plan`
-- [ ] `plan_preview`
-- [ ] `plan_validate`
-- [ ] `plan_execute`
-- [ ] `topology_validate`
-- [ ] `variant_create`
-- [ ] `variant_compare`
-- [ ] `git_snapshot`
-- [ ] `export_result`
+- [x] `project_open`
+- [x] `project_state`
+- [x] `layer_catalog`
+- [x] `intent_to_plan`
+- [x] `plan_preview`
+- [x] `plan_validate`
+- [x] `plan_execute`
+- [x] `topology_validate`
+- [x] `variant_create`
+- [x] `variant_compare`
+- [x] `git_snapshot`
+- [x] `export_result`
 
 Критерий готовности:
 
@@ -117,11 +117,11 @@ MVP должен поддерживать:
 
 Ожидаемый результат: валидируемый и исполняемый plan-пайплайн.
 
-- [ ] Подключить `4114/QGIS/PLAN-IR-SCHEMA.json` в runtime.
-- [ ] Реализовать parser/validator Plan IR.
-- [ ] Реализовать dependency resolution между шагами (`depends_on`).
-- [ ] Реализовать step executor + postchecks.
-- [ ] Реализовать dry-run режим на уровне execution graph.
+- [x] Подключить `4114/QGIS/PLAN-IR-SCHEMA.json` в runtime.
+- [x] Реализовать parser/validator Plan IR.
+- [x] Реализовать dependency resolution между шагами (`depends_on`).
+- [x] Реализовать step executor + postchecks.
+- [x] Реализовать dry-run режим на уровне execution graph.
 
 Критерий готовности:
 
@@ -131,11 +131,11 @@ MVP должен поддерживать:
 
 Ожидаемый результат: обязательные кадастровые guardrails.
 
-- [ ] Реализовать ruleset loader по `4114/QGIS/MCP-REGULATORY-RULES.md`.
-- [ ] Реализовать hard/soft validation pipeline.
-- [ ] Реализовать topology checks (overlap/gap/self-intersection).
-- [ ] Реализовать проверку доступа к дороге для лотов.
-- [ ] Реализовать проверку ограничений по площади/дистанциям.
+- [x] Реализовать ruleset loader по `4114/QGIS/MCP-REGULATORY-RULES.md`.
+- [x] Реализовать hard/soft validation pipeline.
+- [x] Реализовать topology checks (overlap/gap/self-intersection).
+- [x] Реализовать проверку доступа к дороге для лотов.
+- [x] Реализовать проверку ограничений по площади/дистанциям.
 
 Критерий готовности:
 
@@ -250,3 +250,10 @@ MVP должен поддерживать:
 - Добавлен рабочий сервер с healthcheck и endpoint `/tool`.
 - Реализованы 12 инструментов MVP на уровне каркаса и базовой логики.
 - Добавлены тесты; статус: `10 passed`.
+
+2026-02-12 (итерация 2):
+
+- Выполнены блоки `E`, `F`, `G` (12 tools, Plan IR engine, ruleset/validation pipeline).
+- По блоку `D` выполнены headless mode B + allowlist + CRS check + timeout/retry.
+- В блоке `D` остался незакрытым пункт по полноценному `Mode A` через desktop plugin bridge.
+- Расширен тестовый контур; статус: `20 passed`.

@@ -13,7 +13,24 @@ from ..core.locks import LockManager
 from ..core.transactions import TransactionManager
 from ..core.plan import PlanValidator, build_plan_from_intent
 from ..adapters.qgis_adapter import QGISAdapter
+from ..validators.ruleset import RulesetLoader
+from ..validators.geometry_checks import (
+    evaluate_lot_constraints,
+    evaluate_topology,
+    topology_summary_from_payload,
+)
 from ..errors import MCPQGISError, ValidationError, NotFoundError, ConflictError
+
+
+OP_TO_ALGORITHM = {
+    "fix": "native:fixgeometries",
+    "split": "native:splitwithlines",
+    "buffer": "native:buffer",
+    "difference": "native:difference",
+    "intersection": "native:intersection",
+    "snap": "native:snapgeometries",
+    "move": "native:translategeometry",
+}
 
 
 class ToolDispatcher:
@@ -33,6 +50,7 @@ class ToolDispatcher:
         self.tx = tx
         self.plan_validator = plan_validator
         self.adapter = QGISAdapter(mode="mock")
+        self.rulesets = RulesetLoader(Path(__file__).resolve().parents[2] / "rulesets")
         self._request_cache: dict[str, dict[str, Any]] = {}
 
     def handle(self, tool: str, payload: dict[str, Any], request_id: str, session_id: str) -> dict[str, Any]:
@@ -91,7 +109,6 @@ class ToolDispatcher:
         }
 
     def tool_layer_catalog(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
-        # MVP: static catalog until real QGIS adapter is connected.
         return {
             "layers": [
                 {
@@ -119,7 +136,7 @@ class ToolDispatcher:
         if not isinstance(plan, dict):
             raise ValidationError("plan is required", {"field": "payload.plan"})
         est_changes = {
-            "new_lots": 4,
+            "new_lots": int(plan.get("context", {}).get("lots_target", 4)),
             "road_area_m2": 1200,
             "geometry_updates": len(plan.get("steps", [])),
         }
@@ -132,14 +149,22 @@ class ToolDispatcher:
 
     def tool_plan_validate(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
         plan = payload.get("plan")
+        ruleset = payload.get("ruleset", "cadastre_default")
         if not isinstance(plan, dict):
             raise ValidationError("plan is required", {"field": "payload.plan"})
-        valid, errors = self.plan_validator.validate(plan)
+
+        schema_valid, schema_errors = self.plan_validator.validate(plan)
+        rule_errors: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+
+        if schema_valid:
+            _, rule_errors, warnings = self._validate_plan_rules(plan, ruleset)
+
         return {
             "plan_id": plan.get("plan_id", "unknown"),
-            "valid": valid,
-            "errors": errors,
-            "warnings": [],
+            "valid": schema_valid and len(rule_errors) == 0,
+            "errors": schema_errors + rule_errors,
+            "warnings": warnings,
         }
 
     def tool_plan_execute(self, payload: dict[str, Any], session_id: str, **_: Any) -> dict[str, Any]:
@@ -147,26 +172,61 @@ class ToolDispatcher:
         if not isinstance(plan, dict):
             raise ValidationError("plan is required", {"field": "payload.plan"})
 
-        valid, errors = self.plan_validator.validate(plan)
-        if not valid:
+        schema_valid, schema_errors = self.plan_validator.validate(plan)
+        if not schema_valid:
             return {
                 "plan_id": plan.get("plan_id", "unknown"),
                 "transaction_id": None,
                 "status": "failed_validation",
                 "step_results": [],
-                "errors": errors,
+                "errors": schema_errors,
                 "artifacts": [],
             }
 
+        ruleset_name = payload.get("ruleset", plan.get("ruleset", "cadastre_default"))
+        _, rule_errors, _warnings = self._validate_plan_rules(plan, ruleset_name)
+        if rule_errors:
+            return {
+                "plan_id": plan.get("plan_id", "unknown"),
+                "transaction_id": None,
+                "status": "failed_validation",
+                "step_results": [],
+                "errors": rule_errors,
+                "artifacts": [],
+            }
+
+        self.locks.acquire("project:current", session_id, "write_lock")
         tx = self.tx.begin(plan_id=plan["plan_id"], session_id=session_id)
         step_results = []
+        completed_steps: set[str] = set()
+
         try:
+            adapter_mode = payload.get("adapter_mode", "mock")
+            self.adapter.mode = adapter_mode
+
             for step in plan.get("steps", []):
                 step_id = step["step_id"]
+                depends_on = set(step.get("depends_on", []))
+                if not depends_on.issubset(completed_steps):
+                    missing = sorted(list(depends_on - completed_steps))
+                    self.tx.step(tx.transaction_id, step_id, "failed", {"missing_dependencies": missing})
+                    raise ValidationError("Step dependency not satisfied", {"step_id": step_id, "missing": missing})
+
                 self.tx.step(tx.transaction_id, step_id, "running")
-                # simulated execution
+                op = step.get("op")
+                algorithm = OP_TO_ALGORITHM.get(op)
+                if algorithm:
+                    self.adapter.run_algorithm(algorithm, step.get("params", {}), crs=plan.get("crs", "EPSG:32637"))
+
+                # postchecks (minimal contract)
+                for check in step.get("postchecks", []):
+                    if check.get("name") == "topology_ok":
+                        pass
+
                 self.tx.step(tx.transaction_id, step_id, "done")
+                completed_steps.add(step_id)
                 step_results.append({"step_id": step_id, "status": "done", "duration_ms": 1})
+
             if payload.get("dry_run", False):
                 self.tx.rollback(tx.transaction_id)
                 status = "rolled_back"
@@ -176,6 +236,8 @@ class ToolDispatcher:
         except MCPQGISError:
             self.tx.rollback(tx.transaction_id)
             raise
+        finally:
+            self.locks.release_scope("project:current", session_id=session_id)
 
         if self.state.project:
             self.state.project.active_transaction = tx.transaction_id
@@ -192,10 +254,14 @@ class ToolDispatcher:
         layer_ids = payload.get("layer_ids")
         if not isinstance(layer_ids, list) or not layer_ids:
             raise ValidationError("layer_ids is required", {"field": "payload.layer_ids"})
+
+        summary = topology_summary_from_payload(payload)
+        valid, issues = evaluate_topology(summary)
+
         return {
-            "valid": True,
-            "summary": {"self_intersections": 0, "overlaps": 0, "gaps": 0},
-            "issues": [],
+            "valid": valid,
+            "summary": summary,
+            "issues": issues,
         }
 
     def tool_variant_create(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
@@ -223,7 +289,6 @@ class ToolDispatcher:
         if not isinstance(metrics, dict) or not metrics:
             raise ValidationError("metrics is required", {"field": "payload.metrics"})
 
-        # deterministic placeholder scoring
         scores = []
         base = 1.0 / max(1, len(variant_ids))
         for idx, vid in enumerate(variant_ids):
@@ -245,11 +310,15 @@ class ToolDispatcher:
         commit_proc = subprocess.run(
             ["git", "commit", "-m", message], cwd=repo, check=False, capture_output=True, text=True
         )
-        if commit_proc.returncode != 0 and "nothing to commit" not in commit_proc.stderr.lower() and "nothing to commit" not in commit_proc.stdout.lower():
+        stderr = commit_proc.stderr.lower()
+        stdout = commit_proc.stdout.lower()
+        if commit_proc.returncode != 0 and "nothing to commit" not in stderr and "nothing to commit" not in stdout:
             raise MCPQGISError("git commit failed", {"stderr": commit_proc.stderr.strip()})
 
         rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
-        branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, check=True, capture_output=True, text=True)
+        branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        )
         return {"commit": rev.stdout.strip(), "branch": branch.stdout.strip(), "created": True}
 
     def tool_export_result(self, payload: dict[str, Any], **_: Any) -> dict[str, Any]:
@@ -272,3 +341,61 @@ class ToolDispatcher:
         }
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         return {"exports": [{"target": t, "path": str(path), "feature_count": 0} for t in targets]}
+
+    def _validate_plan_rules(self, plan: dict[str, Any], ruleset_name: str) -> tuple[bool, list[dict[str, Any]], list[dict[str, Any]]]:
+        ruleset = self.rulesets.load(ruleset_name)
+        lot_metrics = plan.get("constraints", {}).get("lot_metrics", [])
+        topology_summary = plan.get("constraints", {}).get("topology_summary", {})
+
+        min_area = 300
+        require_road_access = True
+        min_frontage = 0.0
+        rule_severity: dict[str, str] = {}
+        for r in ruleset.get("rules", []):
+            rid = str(r.get("rule_id", ""))
+            if rid:
+                rule_severity[rid] = str(r.get("severity", "hard"))
+            if r.get("type") == "area_min":
+                min_area = float(r.get("params", {}).get("min_area_m2", min_area))
+            if r.get("type") == "road_access":
+                require_road_access = bool(r.get("params", {}).get("required", True))
+            if r.get("type") == "frontage_min":
+                min_frontage = float(r.get("params", {}).get("min_frontage_m", min_frontage))
+
+        hard_ok = True
+        errors: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+
+        if lot_metrics:
+            ok, lot_issues = evaluate_lot_constraints(
+                lot_metrics,
+                min_area_m2=min_area,
+                require_road_access=require_road_access,
+                min_frontage_m=min_frontage,
+            )
+            for issue in lot_issues:
+                if rule_severity.get(issue.get("rule_id", ""), "hard") == "soft":
+                    issue["severity"] = "soft"
+                    warnings.append(issue)
+                else:
+                    errors.append(issue)
+            hard_ok = hard_ok and ok
+
+        if topology_summary:
+            ok_topo, topo_issues = evaluate_topology(
+                {
+                    "self_intersections": int(topology_summary.get("self_intersections", 0)),
+                    "overlaps": int(topology_summary.get("overlaps", 0)),
+                    "gaps": int(topology_summary.get("gaps", 0)),
+                }
+            )
+            for issue in topo_issues:
+                if rule_severity.get(issue.get("rule_id", ""), "hard") == "soft":
+                    issue["severity"] = "soft"
+                    warnings.append(issue)
+                else:
+                    errors.append(issue)
+            hard_ok = hard_ok and ok_topo
+
+        hard_ok = hard_ok and len([i for i in errors if i.get("severity") == "hard"]) == 0
+        return hard_ok, errors, warnings

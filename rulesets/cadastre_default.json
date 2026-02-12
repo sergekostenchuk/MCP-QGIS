@@ -1,0 +1,41 @@
+{
+  "ruleset_id": "cadastre_default",
+  "version": "1.0.0",
+  "rules": [
+    {
+      "rule_id": "R-AREA-001",
+      "name": "Minimum lot area",
+      "severity": "hard",
+      "type": "area_min",
+      "params": {"min_area_m2": 300}
+    },
+    {
+      "rule_id": "R-ROAD-001",
+      "name": "Road access required",
+      "severity": "hard",
+      "type": "road_access",
+      "params": {"required": true}
+    },
+    {
+      "rule_id": "R-FRONT-001",
+      "name": "Minimum frontage to road",
+      "severity": "hard",
+      "type": "frontage_min",
+      "params": {"min_frontage_m": 5}
+    },
+    {
+      "rule_id": "R-TOPO-001",
+      "name": "No overlaps",
+      "severity": "hard",
+      "type": "overlap_max",
+      "params": {"max": 0}
+    },
+    {
+      "rule_id": "R-TOPO-002",
+      "name": "No gaps",
+      "severity": "hard",
+      "type": "gap_max",
+      "params": {"max": 0}
+    }
+  ]
+}
