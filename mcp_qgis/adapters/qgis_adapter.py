@@ -211,15 +211,17 @@ class QGISAdapter:
 
     def _call_plugin_bridge(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         attempts = 0
+        attempt_limit = 1 if action == "open_project" else self.max_attempts
+        request_timeout = max(self.timeout_sec, 60.0) if action == "open_project" else self.timeout_sec
         last_error = ""
         request = {"action": action, **payload}
 
-        while attempts < self.max_attempts:
+        while attempts < attempt_limit:
             attempts += 1
             sock: socket.socket | None = None
             try:
-                sock = socket.create_connection((self.bridge_host, self.bridge_port), timeout=self.timeout_sec)
-                sock.settimeout(self.timeout_sec)
+                sock = socket.create_connection((self.bridge_host, self.bridge_port), timeout=request_timeout)
+                sock.settimeout(request_timeout)
                 payload = json.dumps(request, ensure_ascii=False).encode("utf-8") + b"\n"
                 sock.sendall(payload)
 
@@ -253,7 +255,7 @@ class QGISAdapter:
                 if sock is not None:
                     sock.close()
 
-            if attempts < self.max_attempts:
+            if attempts < attempt_limit:
                 time.sleep(self.retry_backoff_sec)
 
         raise MCPQGISError(
@@ -263,6 +265,7 @@ class QGISAdapter:
                 "host": self.bridge_host,
                 "port": self.bridge_port,
                 "attempts": attempts,
+                "attempt_limit": attempt_limit,
                 "error": last_error,
             },
         )

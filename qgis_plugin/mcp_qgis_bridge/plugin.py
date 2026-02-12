@@ -22,6 +22,8 @@ class BridgeServer(QObject):
         self.port = port
         self._server: QTcpServer | None = None
         self._clients: set[Any] = set()
+        self._busy = False
+        self._busy_action: str | None = None
 
     def start(self) -> None:
         if self._server and self._server.isListening():
@@ -82,46 +84,62 @@ class BridgeServer(QObject):
             client.flush()
 
     def _handle_message(self, raw: str) -> dict[str, Any]:
+        action = ""
         try:
             payload = json.loads(raw)
             action = str(payload.get("action", "")).strip()
             if not action:
                 return {"status": "error", "error": "action is required"}
 
-            if action == "ping":
-                return {
-                    "status": "ok",
-                    "action": action,
-                    "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-                    "qgis_version": Qgis.QGIS_VERSION,
-                }
+            if action != "ping":
+                if self._busy:
+                    return {
+                        "status": "error",
+                        "error": "bridge busy",
+                        "busy_action": self._busy_action or "",
+                    }
+                self._busy = True
+                self._busy_action = action
 
-            if action == "open_project":
-                project_path = str(payload.get("project_path", "")).strip()
-                if not project_path:
-                    return {"status": "error", "error": "project_path is required"}
-                ok = QgsProject.instance().read(project_path)
-                if not ok:
-                    return {"status": "error", "error": "Failed to open project", "project_path": project_path}
-                return {"status": "ok", **self._project_state_payload()}
+            try:
+                if action == "ping":
+                    return {
+                        "status": "ok",
+                        "action": action,
+                        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                        "qgis_version": Qgis.QGIS_VERSION,
+                    }
 
-            if action == "project_state":
-                return {"status": "ok", **self._project_state_payload()}
+                if action == "open_project":
+                    project_path = str(payload.get("project_path", "")).strip()
+                    if not project_path:
+                        return {"status": "error", "error": "project_path is required"}
+                    ok = QgsProject.instance().read(project_path)
+                    if not ok:
+                        return {"status": "error", "error": "Failed to open project", "project_path": project_path}
+                    return {"status": "ok", **self._project_state_payload()}
 
-            if action == "layer_catalog":
-                return {"status": "ok", "layers": self._layer_catalog_payload()}
+                if action == "project_state":
+                    return {"status": "ok", **self._project_state_payload()}
 
-            if action == "run_algorithm":
-                algorithm = str(payload.get("algorithm", "")).strip()
-                parameters = payload.get("parameters", {})
-                if not algorithm:
-                    return {"status": "error", "error": "algorithm is required"}
-                if not isinstance(parameters, dict):
-                    return {"status": "error", "error": "parameters must be object"}
-                result = processing.run(algorithm, parameters)
-                return {"status": "ok", "algorithm": algorithm, "result": self._jsonable(result)}
+                if action == "layer_catalog":
+                    return {"status": "ok", "layers": self._layer_catalog_payload()}
 
-            return {"status": "error", "error": f"unknown action: {action}"}
+                if action == "run_algorithm":
+                    algorithm = str(payload.get("algorithm", "")).strip()
+                    parameters = payload.get("parameters", {})
+                    if not algorithm:
+                        return {"status": "error", "error": "algorithm is required"}
+                    if not isinstance(parameters, dict):
+                        return {"status": "error", "error": "parameters must be object"}
+                    result = processing.run(algorithm, parameters)
+                    return {"status": "ok", "algorithm": algorithm, "result": self._jsonable(result)}
+
+                return {"status": "error", "error": f"unknown action: {action}"}
+            finally:
+                if action != "ping":
+                    self._busy = False
+                    self._busy_action = None
         except Exception as exc:  # noqa: BLE001
             QgsMessageLog.logMessage(f"Bridge error: {exc}\n{traceback.format_exc()}", PLUGIN_TAG, Qgis.Critical)
             return {"status": "error", "error": str(exc)}
