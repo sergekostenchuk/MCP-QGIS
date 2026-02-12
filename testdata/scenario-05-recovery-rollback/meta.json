@@ -1,0 +1,6 @@
+{
+  "scenario_id": "scenario-05-recovery-rollback",
+  "status": "ready-for-data",
+  "crs": "EPSG:32637",
+  "description": "Reference scenario for MCP QGIS testing"
+}

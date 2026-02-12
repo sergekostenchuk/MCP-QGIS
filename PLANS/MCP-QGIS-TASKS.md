@@ -40,11 +40,11 @@ MVP должен поддерживать:
 
 Ожидаемый результат: рабочий каркас MCP-сервера и модульная структура.
 
-- [ ] Создать рабочую структуру проекта `mcp_qgis/` (core, tools, adapters, validators, infra).
-- [ ] Создать единый файл конфигурации профилей (`local`, `server`).
-- [ ] Подключить логирование и correlation id (`request_id`, `session_id`, `transaction_id`).
-- [ ] Добавить базовые CLI-команды: `run`, `check-config`, `doctor`.
-- [ ] Добавить `README` для запуска MVP.
+- [x] Создать рабочую структуру проекта `mcp_qgis/` (core, tools, adapters, validators, infra).
+- [x] Создать единый файл конфигурации профилей (`local`, `server`).
+- [x] Подключить логирование и correlation id (`request_id`, `session_id`, `transaction_id`).
+- [x] Добавить базовые CLI-команды: `run`, `check-config`, `doctor`.
+- [x] Добавить `README` для запуска MVP.
 
 Критерий готовности:
 
@@ -54,11 +54,11 @@ MVP должен поддерживать:
 
 Ожидаемый результат: строгая проверка входа/выхода всех инструментов.
 
-- [ ] Имплементировать envelope из `4114/QGIS/MCP-TOOLS-SCHEMA.md`.
-- [ ] Подключить JSON-schema validation из `4114/QGIS/schemas/mcp-tools.schema.json`.
-- [ ] Добавить единый mapper ошибок (`E_VALIDATION`, `E_CONFLICT`, `E_INTERNAL` и т.д.).
-- [ ] Добавить версионность `api_version` и отказ на несовместимых версиях.
-- [ ] Реализовать примеры позитивных/негативных контрактных тестов.
+- [x] Имплементировать envelope из `4114/QGIS/MCP-TOOLS-SCHEMA.md`.
+- [x] Подключить JSON-schema validation из `4114/QGIS/schemas/mcp-tools.schema.json`.
+- [x] Добавить единый mapper ошибок (`E_VALIDATION`, `E_CONFLICT`, `E_INTERNAL` и т.д.).
+- [x] Добавить версионность `api_version` и отказ на несовместимых версиях.
+- [x] Реализовать примеры позитивных/негативных контрактных тестов.
 
 Критерий готовности:
 
@@ -68,11 +68,11 @@ MVP должен поддерживать:
 
 Ожидаемый результат: безопасное выполнение изменений с rollback.
 
-- [ ] Реализовать менеджер сессий по `4114/QGIS/MCP-SESSIONS.md`.
-- [ ] Реализовать lock manager (project/layer write lock, read lock).
-- [ ] Реализовать transaction manager по `4114/QGIS/MCP-TRANSACTIONS.md`.
-- [ ] Добавить recovery для `recovery_pending` транзакций.
-- [ ] Добавить журнал tx-событий.
+- [x] Реализовать менеджер сессий по `4114/QGIS/MCP-SESSIONS.md`.
+- [x] Реализовать lock manager (project/layer write lock, read lock).
+- [x] Реализовать transaction manager по `4114/QGIS/MCP-TRANSACTIONS.md`.
+- [x] Добавить recovery для `recovery_pending` транзакций.
+- [x] Добавить журнал tx-событий.
 
 Критерий готовности:
 
@@ -223,7 +223,7 @@ MVP должен поддерживать:
 
 ## 5. Последовательность выполнения
 
-- [ ] Шаг 1: Блоки A+B+C
+- [x] Шаг 1: Блоки A+B+C
 - [ ] Шаг 2: Блоки D+E+F+G
 - [ ] Шаг 3: Блоки H+I+J+K
 - [ ] Шаг 4: Блоки L+M
@@ -244,3 +244,9 @@ MVP должен поддерживать:
 - Создан `MCP-QGIS-TASKS.md` как основной execution-план реализации MVP.
 - Стартовая фаза: planning complete, implementation not started.
 
+2026-02-12 (итерация 1):
+
+- Выполнены блоки `A`, `B`, `C` (bootstrap, API envelope/validation, session-lock-transaction core).
+- Добавлен рабочий сервер с healthcheck и endpoint `/tool`.
+- Реализованы 12 инструментов MVP на уровне каркаса и базовой логики.
+- Добавлены тесты; статус: `10 passed`.

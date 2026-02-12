@@ -1,0 +1,3 @@
+- Add source layers to input folder.
+- Add expected artifacts to expected folder.
+- Keep all distances in meters and areas in square meters.

@@ -5,11 +5,14 @@
 __pycache__/
 *.pyc
 .venv/
+*.egg-info/
+.pytest_cache/
 
 # MCP/QGIS runtime artifacts
 artifacts/
 logs/
 *.log
+runtime/
 
 # Temp
 .tmp/

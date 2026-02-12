@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ser-kost.local/schemas/mcp-tools/1.0.0",
+  "title": "MCP QGIS Tool Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "request_id", "session_id", "tool", "payload"],
+  "properties": {
+    "api_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "request_id": {"type": "string", "format": "uuid"},
+    "session_id": {"type": "string", "format": "uuid"},
+    "tool": {
+      "type": "string",
+      "enum": [
+        "project_open",
+        "project_state",
+        "layer_catalog",
+        "intent_to_plan",
+        "plan_preview",
+        "plan_validate",
+        "plan_execute",
+        "topology_validate",
+        "variant_create",
+        "variant_compare",
+        "git_snapshot",
+        "export_result"
+      ]
+    },
+    "payload": {"type": "object"}
+  }
+}
