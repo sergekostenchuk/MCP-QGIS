@@ -4,6 +4,12 @@ MCP-сервис и QGIS-плагин для управления геоопер
 
 ![QGIS + MCP screenshot](docs/assets/qgis-mcp-screenshot.png)
 
+## Связанный проект
+
+- [QGIS-OC-CHAT](https://github.com/sergekostenchuk/QGIS-OC-CHAT) — companion-проект с QGIS chat plugin, OpenCode sidecar, HITL-подтверждением, RAG-контекстом и безопасным выполнением GIS tool workflows.
+
+`MCP-QGIS` — базовый MCP/QGIS bridge и набор инструментов. `QGIS-OC-CHAT` показывает, как этот слой можно использовать в chat/plugin workflow с OpenCode-style planning.
+
 ## Что в репозитории
 
 - `mcp_qgis/` — сервер, инструменты, адаптеры.
