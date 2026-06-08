@@ -10,6 +10,30 @@ MCP-сервис и QGIS-плагин для управления геоопер
 
 `MCP-QGIS` — базовый MCP/QGIS bridge и набор инструментов. `QGIS-OC-CHAT` показывает, как этот слой можно использовать в chat/plugin workflow с OpenCode-style planning.
 
+## Usage
+
+Use `MCP-QGIS` when an LLM workflow needs a local bridge into QGIS-related operations rather than a generic chat-only interface. The current server exposes health and tool endpoints over HTTP, so it can be wired into Codex, Claude Code, Antigravity, or another agent harness that can call local tools.
+
+Typical local loop:
+
+1. Start QGIS or prepare the local GIS workspace.
+2. Start the MCP-QGIS server with `mcp-qgis run`.
+3. Connect the agent client using one of the example profiles.
+4. Execute small, reviewable GIS tool requests and keep QGIS as the source of truth for map/project state.
+
+## Ecosystem relevance
+
+Geospatial agent workflows are a strong OSS/Codex use case because useful work depends on local files, desktop state, domain-specific libraries, and user review. `MCP-QGIS` provides the bridge layer; [QGIS-OC-CHAT](https://github.com/sergekostenchuk/QGIS-OC-CHAT) demonstrates a companion plugin/sidecar workflow with OpenCode-style planning and human-in-the-loop confirmation.
+
+Together, the repositories show a practical pattern for local agent tools: expose narrow operations, keep execution inspectable, and document safety boundaries before broad automation.
+
+## Roadmap
+
+- Add more reproducible sample GIS workflows using public or synthetic data.
+- Tighten the boundary between read-only inspection, proposed actions, and user-approved execution.
+- Improve smoke tests for QGIS plugin/sidecar integration paths.
+- Document client-specific setup for Codex, Claude Code, Antigravity, and other MCP-compatible harnesses.
+
 ## Что в репозитории
 
 - `mcp_qgis/` — сервер, инструменты, адаптеры.
